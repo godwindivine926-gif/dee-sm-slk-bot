@@ -132,6 +132,7 @@ app.post("/webhook", async (req, res) => {
       chatId,
       `❌ Failed to add ${symbol}.\n\nCheck server logs or table constraints.`
     ):
+  }
     }
 
     if (command === "/remove") {
