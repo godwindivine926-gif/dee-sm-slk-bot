@@ -11,7 +11,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const TELEGRAM_API = `https://api.telegram.org/bot${TOKEN}`;
-const DATABASE_API = `${SUPABASE_URL}/rest/v1/watchlist`;
+const DATABASE_API = `${SUPABASE_URL.trim().replace(/\/+$/, "")}/rest/v1/watchlist`;
 
 if (!TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
   throw new Error("Missing required environment variables.");
