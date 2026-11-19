@@ -111,19 +111,27 @@ app.post("/webhook", async (req, res) => {
     }
 
     if (command === "/add") {
-      await databaseRequest("post",
-        { on_conflict: "chat_id,symbol" },
-        {
-          chat_id: chatId,
-          symbol,
-          is_active: true
-        },
-        { Prefer: "resolution=merge-duplicates,return=minimal" }
-      );
+  try {
+    await databaseRequest(
+      "post",
+      { on_conflict: "chat_id,symbol" },
+      {
+        chat_id: chatId,
+        symbol,
+        is_active: true
+      },
+      {
+        Prefer: "resolution=merge-duplicates,return=minimal"
+      }
+    );
 
-      return await sendMessage(chatId,
-        `✅ ${symbol} added to your watchlist.`
-      );
+    return await sendMessage(chatId, `✅ ${symbol} added to your watchlist.`);
+  } catch (err) {
+    console.error("Add error:", err.response?.data || err.message);
+    return await sendMessage(
+      chatId,
+      `❌ Failed to add ${symbol}.\n\nCheck server logs or table constraints.`
+    ):
     }
 
     if (command === "/remove") {
