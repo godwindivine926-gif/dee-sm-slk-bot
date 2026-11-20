@@ -21,7 +21,9 @@ const supabaseHeaders = {
   "Content-Type": "application/json"
 };
 
-// ==================== GENERAL HELPERS ====================
+// =====================================
+// GENERAL HELPERS
+// =====================================
 
 function normalizeSymbol(input) {
   let symbol = String(input || "EUR/USD")
@@ -29,7 +31,6 @@ function normalizeSymbol(input) {
     .toUpperCase()
     .replace(/\s/g, "");
 
-  // Convert common six-letter symbols into provider format.
   if (/^[A-Z]{6}$/.test(symbol)) {
     symbol = `${symbol.slice(0, 3)}/${symbol.slice(3)}`;
   }
@@ -45,10 +46,7 @@ async function sendMessage(chatId, text) {
       parse_mode: "HTML"
     });
   } catch (error) {
-    console.error(
-      "Telegram message error:",
-      error.response?.data || error.message
-    );
+    console.error("Telegram error:", error.message);
   }
 }
 
@@ -71,13 +69,11 @@ async function getMarketCandles(symbol, interval, outputsize = 100) {
     throw new Error("TWELVE_DATA_API_KEY is missing.");
   }
 
-  const normalizedSymbol = normalizeSymbol(symbol);
-
   const response = await axios.get(
     "https://api.twelvedata.com/time_series",
     {
       params: {
-        symbol: normalizedSymbol,
+        symbol: normalizeSymbol(symbol),
         interval,
         outputsize,
         apikey: TWELVE_DATA_API_KEY
@@ -112,13 +108,322 @@ function candleColor(candle) {
   return "DOJI";
 }
 
-// ==================== HOME ====================
+// =====================================
+// MARKET DATA VALIDATION
+// =====================================
+
+function filterCompletedDailyCandles(rawCandles) {
+  const watNow = new Date(Date.now() + 60 * 60 * 1000);
+  const todayWAT = watNow.toISOString().slice(0, 10);
+
+  const candles = [];
+  const excludedWeekend = [];
+  const excludedUnfinished = [];
+
+  for (const candle of rawCandles) {
+    const date = candle.datetime;
+
+    if (!date) continue;
+
+    const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+
+    if (day === 0 || day === 6) {
+      excludedWeekend.push(date);
+      continue;
+    }
+
+    if (date >= todayWAT) {
+      excludedUnfinished.push(date);
+      continue;
+    }
+
+    const values = [
+      Number(candle.open),
+      Number(candle.high),
+      Number(candle.low),
+      Number(candle.close)
+    ];
+
+    if (!values.every(Number.isFinite)) continue;
+
+    candles.push(candle);
+  }
+
+  candles.sort((a, b) =>
+    a.datetime.localeCompare(b.datetime)
+  );
+
+  return {
+    candles,
+    excludedWeekend,
+    excludedUnfinished
+  };
+}
+
+// =====================================
+// TWO-CANDLE SWING DETECTOR
+// =====================================
+
+function identifySwings(candles) {
+  const swings = [];
+
+  for (let i = 1; i < candles.length; i++) {
+    const first = candles[i - 1];
+    const second = candles[i];
+
+    const firstColor = candleColor(first);
+    const secondColor = candleColor(second);
+
+    // Bullish followed by bearish = Swing High.
+    if (
+      firstColor === "BULLISH" &&
+      secondColor === "BEARISH"
+    ) {
+      swings.push({
+        type: "SWING_HIGH",
+        date: second.datetime,
+        first_candle: first.datetime,
+        second_candle: second.datetime,
+        index: i,
+        level: Math.max(
+          bodyTop(first),
+          bodyTop(second)
+        )
+      });
+    }
+
+    // Bearish followed by bullish = Swing Low.
+    if (
+      firstColor === "BEARISH" &&
+      secondColor === "BULLISH"
+    ) {
+      swings.push({
+        type: "SWING_LOW",
+        date: second.datetime,
+        first_candle: first.datetime,
+        second_candle: second.datetime,
+        index: i,
+        level: Math.min(
+          bodyBottom(first),
+          bodyBottom(second)
+        )
+      });
+    }
+  }
+
+  return swings;
+}
+
+// =====================================
+// REBUILT D1 STRUCTURE DETECTOR
+// =====================================
+
+function detectDailyStructure(candles) {
+  const swings = identifySwings(candles);
+
+  let latestSwingHigh = null;
+  let latestSwingLow = null;
+
+  let bearishLL = null;
+  let bullishHH = null;
+
+  let pendingLH = null;
+  let pendingHL = null;
+
+  let protectedLH = null;
+  let protectedHL = null;
+
+  const events = [];
+
+  for (let i = 0; i < candles.length; i++) {
+    const candle = candles[i];
+    const close = Number(candle.close);
+
+    // Register swing formations completed on this candle.
+    const formedSwings = swings.filter(
+      swing => swing.index === i
+    );
+
+    for (const swing of formedSwings) {
+      if (swing.type === "SWING_HIGH") {
+        latestSwingHigh = swing;
+
+        // A swing high after a confirmed LL is a possible LH.
+        if (bearishLL && i > bearishLL.index) {
+          pendingLH = swing;
+        }
+      }
+
+      if (swing.type === "SWING_LOW") {
+        latestSwingLow = swing;
+
+        // A swing low after a confirmed HH is a possible HL.
+        if (bullishHH && i > bullishHH.index) {
+          pendingHL = swing;
+        }
+      }
+    }
+
+    // ---------------------------------
+    // BEARISH STRUCTURE
+    // ---------------------------------
+
+    // A completed candle body closes below the previous swing low.
+    if (
+      latestSwingLow &&
+      i > latestSwingLow.index &&
+      close < latestSwingLow.level
+    ) {
+      bearishLL = {
+        date: candle.datetime,
+        index: i,
+        level: bodyBottom(candle),
+        broken_swing_low: latestSwingLow.level
+      };
+
+      protectedLH = null;
+
+      events.push({
+        type: "LL_CONFIRMED",
+        date: candle.datetime,
+        broken_swing_low: latestSwingLow.level,
+        LL_body_bottom: bearishLL.level
+      });
+    }
+
+    // A subsequent close below the LL confirms the retracement LH.
+    if (
+      bearishLL &&
+      pendingLH &&
+      pendingLH.index < i &&
+      close < bearishLL.level
+    ) {
+      protectedLH = {
+        date: pendingLH.date,
+        level: pendingLH.level,
+        confirmation_date: candle.datetime
+      };
+
+      pendingLH = null;
+
+      events.push({
+        type: "PROTECTED_LH_CONFIRMED",
+        date: protectedLH.date,
+        level: protectedLH.level,
+        continuation_date: candle.datetime
+      });
+    }
+
+    // Bullish EBO: body closes above protected LH.
+    if (
+      protectedLH &&
+      i > bearishLL.index &&
+      close > protectedLH.level
+    ) {
+      events.push({
+        type: "BULLISH_EBO",
+        date: candle.datetime,
+        close,
+        broken_level: protectedLH.level
+      });
+
+      protectedLH = null;
+      pendingLH = null;
+    }
+
+    // ---------------------------------
+    // BULLISH STRUCTURE
+    // ---------------------------------
+
+    // A completed candle body closes above the previous swing high.
+    if (
+      latestSwingHigh &&
+      i > latestSwingHigh.index &&
+      close > latestSwingHigh.level
+    ) {
+      bullishHH = {
+        date: candle.datetime,
+        index: i,
+        level: bodyTop(candle),
+        broken_swing_high: latestSwingHigh.level
+      };
+
+      protectedHL = null;
+
+      events.push({
+        type: "HH_CONFIRMED",
+        date: candle.datetime,
+        broken_swing_high: latestSwingHigh.level,
+        HH_body_top: bullishHH.level
+      });
+    }
+
+    // A subsequent close above the HH confirms the retracement HL.
+    if (
+      bullishHH &&
+      pendingHL &&
+      pendingHL.index < i &&
+      close > bullishHH.level
+    ) {
+      protectedHL = {
+        date: pendingHL.date,
+        level: pendingHL.level,
+        confirmation_date: candle.datetime
+      };
+
+      pendingHL = null;
+
+      events.push({
+        type: "PROTECTED_HL_CONFIRMED",
+        date: protectedHL.date,
+        level: protectedHL.level,
+        continuation_date: candle.datetime
+      });
+    }
+
+    // Bearish EBO: body closes below protected HL.
+    if (
+      protectedHL &&
+      i > bullishHH.index &&
+      close < protectedHL.level
+    ) {
+      events.push({
+        type: "BEARISH_EBO",
+        date: candle.datetime,
+        close,
+        broken_level: protectedHL.level
+      });
+
+      protectedHL = null;
+      pendingHL = null;
+    }
+  }
+
+  return {
+    latestSwingHigh,
+    latestSwingLow,
+    bearishLL,
+    bullishHH,
+    pendingLH,
+    pendingHL,
+    protectedLH,
+    protectedHL,
+    swings,
+    events
+  };
+}
+
+// =====================================
+// HOME
+// =====================================
 
 app.get("/", (req, res) => {
   res.send("DEE SM SLK BOT is running.");
 });
 
-// ==================== TELEGRAM WEBHOOK ====================
+// =====================================
+// TELEGRAM WEBHOOK
+// =====================================
 
 app.post("/webhook", async (req, res) => {
   res.sendStatus(200);
@@ -129,8 +434,7 @@ app.post("/webhook", async (req, res) => {
     if (!message || !message.text) return;
 
     const chatId = message.chat.id;
-    const text = message.text.trim();
-    const parts = text.split(/\s+/);
+    const parts = message.text.trim().split(/\s+/);
 
     const command = parts[0].split("@")[0].toLowerCase();
     const argument = parts[1];
@@ -138,14 +442,15 @@ app.post("/webhook", async (req, res) => {
     if (command === "/start") {
       await sendMessage(
         chatId,
-        `Welcome to <b>DEE SM SLK BOT</b>.\n\n` +
-        `Your market monitoring assistant.\n\n` +
+        `<b>DEE SM SLK BOT</b>\n\n` +
         `/help - View commands\n` +
-        `/add GBPUSD - Add a pair\n` +
-        `/remove GBPUSD - Remove a pair\n` +
-        `/watchlist - View your pairs\n` +
-        `/check GBPUSD - Check a pair\n` +
-        `/weekly - View last week's events`
+        `/add GBPUSD - Add pair\n` +
+        `/remove GBPUSD - Remove pair\n` +
+        `/watchlist - View pairs\n` +
+        `/check GBPUSD - Check pair\n` +
+        `/pause - Pause monitoring\n` +
+        `/resume - Resume monitoring\n` +
+        `/weekly - Previous week's events`
       );
       return;
     }
@@ -153,14 +458,14 @@ app.post("/webhook", async (req, res) => {
     if (command === "/help") {
       await sendMessage(
         chatId,
-        `<b>DEE SM SLK BOT COMMANDS</b>\n\n` +
-        `/add GBPUSD - Add a pair\n` +
-        `/remove GBPUSD - Remove a pair\n` +
-        `/watchlist - View your watchlist\n` +
-        `/pause - Pause monitoring\n` +
-        `/resume - Resume monitoring\n` +
-        `/check GBPUSD - Check a pair\n` +
-        `/weekly - View last week's events`
+        `<b>BOT COMMANDS</b>\n\n` +
+        `/add GBPUSD\n` +
+        `/remove GBPUSD\n` +
+        `/watchlist\n` +
+        `/check GBPUSD\n` +
+        `/pause\n` +
+        `/resume\n` +
+        `/weekly`
       );
       return;
     }
@@ -177,7 +482,7 @@ app.post("/webhook", async (req, res) => {
         `watchlist?chat_id=eq.${chatId}&symbol=eq.${encodeURIComponent(symbol)}`
       );
 
-      if (existing.length > 0) {
+      if (existing.length) {
         await sendMessage(chatId, `${symbol} is already on your watchlist.`);
         return;
       }
@@ -188,7 +493,7 @@ app.post("/webhook", async (req, res) => {
         active: true
       });
 
-      await sendMessage(chatId, `${symbol} added to your watchlist.`);
+      await sendMessage(chatId, `${symbol} added.`);
       return;
     }
 
@@ -205,7 +510,7 @@ app.post("/webhook", async (req, res) => {
         "DELETE"
       );
 
-      await sendMessage(chatId, `${symbol} removed from your watchlist.`);
+      await sendMessage(chatId, `${symbol} removed.`);
       return;
     }
 
@@ -215,7 +520,7 @@ app.post("/webhook", async (req, res) => {
       );
 
       if (!pairs.length) {
-        await sendMessage(chatId, "Your watchlist is empty. Use /add GBPUSD.");
+        await sendMessage(chatId, "Your watchlist is empty.");
         return;
       }
 
@@ -238,9 +543,7 @@ app.post("/webhook", async (req, res) => {
 
       await sendMessage(
         chatId,
-        active
-          ? "Monitoring resumed."
-          : "Monitoring paused."
+        active ? "Monitoring resumed." : "Monitoring paused."
       );
       return;
     }
@@ -255,23 +558,20 @@ app.post("/webhook", async (req, res) => {
 
       await sendMessage(
         chatId,
-        `${symbol} received.\n\nOn-demand SLK analysis is not connected to the Telegram command yet.`
+        `${symbol} received. Full Telegram SLK analysis is not connected yet.`
       );
       return;
     }
 
     if (command === "/weekly") {
       const now = new Date();
-
-      // Previous Sunday to Saturday in West Africa Time.
       const watOffset = 60 * 60 * 1000;
       const watNow = new Date(now.getTime() + watOffset);
 
-      const day = watNow.getUTCDay();
-      const daysSinceSunday = day;
-
       const thisSunday = new Date(watNow);
-      thisSunday.setUTCDate(watNow.getUTCDate() - daysSinceSunday);
+      thisSunday.setUTCDate(
+        watNow.getUTCDate() - watNow.getUTCDay()
+      );
       thisSunday.setUTCHours(0, 0, 0, 0);
 
       const previousSunday = new Date(thisSunday);
@@ -280,8 +580,13 @@ app.post("/webhook", async (req, res) => {
       const previousSaturday = new Date(thisSunday);
       previousSaturday.setUTCMilliseconds(-1);
 
-      const from = new Date(previousSunday.getTime() - watOffset).toISOString();
-      const to = new Date(previousSaturday.getTime() - watOffset).toISOString();
+      const from = new Date(
+        previousSunday.getTime() - watOffset
+      ).toISOString();
+
+      const to = new Date(
+        previousSaturday.getTime() - watOffset
+      ).toISOString();
 
       const events = await databaseRequest(
         `storyline_events?chat_id=eq.${chatId}` +
@@ -291,7 +596,7 @@ app.post("/webhook", async (req, res) => {
       );
 
       if (!events.length) {
-        await sendMessage(chatId, "No saved storyline events found for last week.");
+        await sendMessage(chatId, "No saved events found for last week.");
         return;
       }
 
@@ -304,27 +609,31 @@ app.post("/webhook", async (req, res) => {
     }
 
   } catch (error) {
-    console.error("Webhook error:", error.response?.data || error.message);
+    console.error(
+      "Webhook error:",
+      error.response?.data || error.message
+    );
 
     if (req.body.message?.chat?.id) {
       await sendMessage(
         req.body.message.chat.id,
-        "Something went wrong while processing that command."
+        "Something went wrong processing that command."
       );
     }
   }
 });
 
-// ==================== MARKET DATA TEST ====================
+// =====================================
+// MARKET DATA TEST
+// =====================================
 
 app.get("/test-market-data", async (req, res) => {
   try {
     const symbol = normalizeSymbol(req.query.symbol);
-
-    const results = {};
+    const data = {};
 
     for (const timeframe of ["1week", "1day", "4h"]) {
-      results[timeframe] = await getMarketCandles(
+      data[timeframe] = await getMarketCandles(
         symbol,
         timeframe,
         10
@@ -334,7 +643,7 @@ app.get("/test-market-data", async (req, res) => {
     res.json({
       success: true,
       symbol,
-      data: results
+      data
     });
 
   } catch (error) {
@@ -345,15 +654,15 @@ app.get("/test-market-data", async (req, res) => {
   }
 });
 
-// ==================== WEEKLY A/V DETECTOR ====================
+// =====================================
+// WEEKLY A/V
+// =====================================
 
 app.get("/test-w1-av", async (req, res) => {
   try {
     const symbol = normalizeSymbol(req.query.symbol);
 
     const raw = await getMarketCandles(symbol, "1week", 100);
-
-    // Exclude the newest potentially unfinished weekly candle.
     const candles = raw.slice(1).reverse();
 
     const formations = [];
@@ -371,8 +680,8 @@ app.get("/test-w1-av", async (req, res) => {
           first_candle: first.datetime,
           second_candle: second.datetime,
           zone: {
-            low: bodyTop(second),
-            high: bodyTop(first)
+            low: Math.min(bodyTop(first), bodyTop(second)),
+            high: Math.max(bodyTop(first), bodyTop(second))
           }
         });
       }
@@ -383,8 +692,8 @@ app.get("/test-w1-av", async (req, res) => {
           first_candle: first.datetime,
           second_candle: second.datetime,
           zone: {
-            low: bodyBottom(first),
-            high: bodyBottom(second)
+            low: Math.min(bodyBottom(first), bodyBottom(second)),
+            high: Math.max(bodyBottom(first), bodyBottom(second))
           }
         });
       }
@@ -405,7 +714,9 @@ app.get("/test-w1-av", async (req, res) => {
   }
 });
 
-// ==================== WEEKLY OPEN/CLOSE DETECTOR ====================
+// =====================================
+// WEEKLY OPEN/CLOSE
+// =====================================
 
 app.get("/test-w1-open-close", async (req, res) => {
   try {
@@ -431,7 +742,6 @@ app.get("/test-w1-open-close", async (req, res) => {
           type: "BULLISH-OPEN-CLOSE",
           first_candle: first.datetime,
           second_candle: second.datetime,
-          level: Number(second.open),
           first_close: Number(first.close),
           second_open: Number(second.open)
         });
@@ -445,7 +755,6 @@ app.get("/test-w1-open-close", async (req, res) => {
           type: "BEARISH-OPEN-CLOSE",
           first_candle: first.datetime,
           second_candle: second.datetime,
-          level: Number(second.open),
           first_close: Number(first.close),
           second_open: Number(second.open)
         });
@@ -467,51 +776,9 @@ app.get("/test-w1-open-close", async (req, res) => {
   }
 });
 
-// ==================== D1 CANDLE FILTER ====================
-
-function filterCompletedDailyCandles(rawCandles) {
-  const watNow = new Date(Date.now() + 60 * 60 * 1000);
-  const todayWAT = watNow.toISOString().slice(0, 10);
-
-  const valid = [];
-  const excludedWeekend = [];
-  const excludedUnfinished = [];
-
-  for (const candle of rawCandles) {
-    const date = candle.datetime;
-
-    if (!date) continue;
-
-    const day = new Date(`${date}T00:00:00Z`).getUTCDay();
-
-    if (day === 0 || day === 6) {
-      excludedWeekend.push(date);
-      continue;
-    }
-
-    if (date >= todayWAT) {
-      excludedUnfinished.push(date);
-      continue;
-    }
-
-    const open = Number(candle.open);
-    const close = Number(candle.close);
-
-    if (!Number.isFinite(open) || !Number.isFinite(close)) continue;
-
-    valid.push(candle);
-  }
-
-  valid.sort((a, b) => a.datetime.localeCompare(b.datetime));
-
-  return {
-    candles: valid,
-    excludedWeekend,
-    excludedUnfinished
-  };
-}
-
-// ==================== D1 CANDLE TEST ====================
+// =====================================
+// D1 CANDLE TEST
+// =====================================
 
 app.get("/test-d1-candles", async (req, res) => {
   try {
@@ -539,7 +806,9 @@ app.get("/test-d1-candles", async (req, res) => {
   }
 });
 
-// ==================== D1 STRUCTURE / EBO TEST ====================
+// =====================================
+// NEW D1 STRUCTURE TEST
+// =====================================
 
 app.get("/test-d1-ebo", async (req, res) => {
   try {
@@ -557,207 +826,42 @@ app.get("/test-d1-ebo", async (req, res) => {
       });
     }
 
-    let bearish = {
-      candidateLL: {
-        date: candles[0].datetime,
-        body_bottom: bodyBottom(candles[0])
-      },
-      pullbackStarted: false,
-      pullbackHigh: null,
-      protectedLH: null,
-      activeLL: null
-    };
-
-    let bullish = {
-      candidateHH: {
-        date: candles[0].datetime,
-        body_top: bodyTop(candles[0])
-      },
-      pullbackStarted: false,
-      pullbackLow: null,
-      protectedHL: null,
-      activeHH: null
-    };
-
-    const events = [];
-
-    for (let i = 1; i < candles.length; i++) {
-      const candle = candles[i];
-      const previous = candles[i - 1];
-
-      const close = Number(candle.close);
-      const top = bodyTop(candle);
-      const bottom = bodyBottom(candle);
-
-      const previousTop = bodyTop(previous);
-      const previousBottom = bodyBottom(previous);
-
-      // Bearish sequence: provisional LL, pullback, continuation.
-      if (!bearish.pullbackStarted && !bearish.protectedLH) {
-        if (bottom < bearish.candidateLL.body_bottom) {
-          bearish.candidateLL = {
-            date: candle.datetime,
-            body_bottom: bottom
-          };
-        }
-
-        if (close > previousTop) {
-          bearish.pullbackStarted = true;
-          bearish.pullbackHigh = {
-            date: candle.datetime,
-            body_top: top
-          };
-        }
-
-      } else if (bearish.pullbackStarted) {
-        if (top > bearish.pullbackHigh.body_top) {
-          bearish.pullbackHigh = {
-            date: candle.datetime,
-            body_top: top
-          };
-        }
-
-        if (close < bearish.candidateLL.body_bottom) {
-          bearish.protectedLH = {
-            date: bearish.pullbackHigh.date,
-            body_top: bearish.pullbackHigh.body_top
-          };
-
-          bearish.activeLL = {
-            date: candle.datetime,
-            body_bottom: bottom
-          };
-
-          events.push({
-            type: "PROTECTED_LH_CONFIRMED",
-            date: bearish.protectedLH.date,
-            level: bearish.protectedLH.body_top,
-            continuation_date: candle.datetime
-          });
-
-          bearish.candidateLL = {
-            date: candle.datetime,
-            body_bottom: bottom
-          };
-
-          bearish.pullbackStarted = false;
-          bearish.pullbackHigh = null;
-        }
-      }
-
-      if (
-        bearish.protectedLH &&
-        close > bearish.protectedLH.body_top
-      ) {
-        events.push({
-          type: "BULLISH_EBO",
-          date: candle.datetime,
-          close,
-          broken_level: bearish.protectedLH.body_top
-        });
-
-        bearish.protectedLH = null;
-      }
-
-      // Bullish sequence: provisional HH, pullback, continuation.
-      if (!bullish.pullbackStarted && !bullish.protectedHL) {
-        if (top > bullish.candidateHH.body_top) {
-          bullish.candidateHH = {
-            date: candle.datetime,
-            body_top: top
-          };
-        }
-
-        if (close < previousBottom) {
-          bullish.pullbackStarted = true;
-          bullish.pullbackLow = {
-            date: candle.datetime,
-            body_bottom: bottom
-          };
-        }
-
-      } else if (bullish.pullbackStarted) {
-        if (bottom < bullish.pullbackLow.body_bottom) {
-          bullish.pullbackLow = {
-            date: candle.datetime,
-            body_bottom: bottom
-          };
-        }
-
-        if (close > bullish.candidateHH.body_top) {
-          bullish.protectedHL = {
-            date: bullish.pullbackLow.date,
-            body_bottom: bullish.pullbackLow.body_bottom
-          };
-
-          bullish.activeHH = {
-            date: candle.datetime,
-            body_top: top
-          };
-
-          events.push({
-            type: "PROTECTED_HL_CONFIRMED",
-            date: bullish.protectedHL.date,
-            level: bullish.protectedHL.body_bottom,
-            continuation_date: candle.datetime
-          });
-
-          bullish.candidateHH = {
-            date: candle.datetime,
-            body_top: top
-          };
-
-          bullish.pullbackStarted = false;
-          bullish.pullbackLow = null;
-        }
-      }
-
-      if (
-        bullish.protectedHL &&
-        close < bullish.protectedHL.body_bottom
-      ) {
-        events.push({
-          type: "BEARISH_EBO",
-          date: candle.datetime,
-          close,
-          broken_level: bullish.protectedHL.body_bottom
-        });
-
-        bullish.protectedHL = null;
-      }
-    }
+    const result = detectDailyStructure(candles);
 
     res.json({
       success: true,
       symbol,
       timeframe: "D1",
-      latest_completed_candle: candles[candles.length - 1].datetime,
+
+      latest_completed_candle:
+        candles[candles.length - 1].datetime,
+
+      latest_swing_high: result.latestSwingHigh,
+      latest_swing_low: result.latestSwingLow,
 
       bearish_structure: {
-        active_LL: bearish.activeLL,
-        candidate_LL: bearish.candidateLL,
-        pullback_in_progress: bearish.pullbackStarted,
-        latest_protected_LH: bearish.protectedLH
+        LL: result.bearishLL,
+        pending_LH: result.pendingLH,
+        protected_LH: result.protectedLH
       },
 
       bullish_structure: {
-        active_HH: bullish.activeHH,
-        candidate_HH: bullish.candidateHH,
-        pullback_in_progress: bullish.pullbackStarted,
-        latest_protected_HL: bullish.protectedHL
+        HH: result.bullishHH,
+        pending_HL: result.pendingHL,
+        protected_HL: result.protectedHL
       },
 
-      events,
+      events: result.events,
 
       excluded_weekend_dates: filtered.excludedWeekend,
       excluded_unfinished_dates: filtered.excludedUnfinished,
 
       note:
-        "Experimental sequential body-based detector. Initial reference swings are provisional. Validate swing structure and key-level context on the chart before relying on results."
+        "Swing levels use consecutive two-candle formations and candle bodies. EBO requires a completed candle body close beyond the protected swing."
     });
 
   } catch (error) {
-    console.error("D1 structure error:", error.response?.data || error.message);
+    console.error("D1 detector error:", error.response?.data || error.message);
 
     res.status(500).json({
       success: false,
@@ -766,7 +870,9 @@ app.get("/test-d1-ebo", async (req, res) => {
   }
 });
 
-// ==================== H4 CANDLE TEST ====================
+// =====================================
+// H4 CANDLE TEST
+// =====================================
 
 app.get("/test-h4-candles", async (req, res) => {
   try {
@@ -790,7 +896,9 @@ app.get("/test-h4-candles", async (req, res) => {
   }
 });
 
-// ==================== START SERVER ====================
+// =====================================
+// SERVER START
+// =====================================
 
 app.listen(PORT, () => {
   console.log(`DEE SM SLK BOT running on port ${PORT}`);
