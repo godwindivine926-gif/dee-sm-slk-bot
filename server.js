@@ -322,7 +322,7 @@ app.get("/test-market-data", async (req, res) => {
       } else {
         results[timeframe.name] = {
           success: true,
-          candle: response.data.values[0]
+          candle: response.data.values
         };
       }
     }
