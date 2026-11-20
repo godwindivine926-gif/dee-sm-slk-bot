@@ -444,7 +444,7 @@ app.get("/test-w1-open-close", async (req, res) => {
       {
         params: {
           symbol: req.query.symbol || "EUR/USD",
-          interval: "1week"
+          interval: "1week",
           outputsize: 100,
           apikey: process.env.TWELVE_DATA_API_KEY
         }
