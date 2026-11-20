@@ -340,6 +340,103 @@ app.get("/test-market-data", async (req, res) => {
     });
   }
 });
+
+app.get("/test-w1-av", async (req, res) => {
+  try {
+    const response = await axios.get(
+      "https://api.twelvedata.com/time_series",
+      {
+        params: {
+          symbol: "EUR/USD",
+          interval: "1week",
+          outputsize: 100,
+          apikey: process.env.TWELVE_DATA_API_KEY
+        }
+      }
+    );
+
+    if (response.data.status === "error") {
+      return res.status(400).json({
+        success: false,
+        message: response.data.message
+      });
+    }
+
+    const candles = response.data.values;
+
+    if (!candles || candles.length < 3) {
+      return res.json({
+        success: false,
+        message: "Not enough Weekly candles."
+      });
+    }
+
+    // Exclude the newest candle because it may still be forming.
+    const closedCandles = candles.slice(1);
+
+    let latestFormation = null;
+
+    // Twelve Data returns candles newest first.
+    for (let i = 0; i < closedCandles.length - 1; i++) {
+      const newer = closedCandles[i];
+      const older = closedCandles[i + 1];
+
+      const olderOpen = Number(older.open);
+      const olderClose = Number(older.close);
+      const newerOpen = Number(newer.open);
+      const newerClose = Number(newer.close);
+
+      const olderTop = Math.max(olderOpen, olderClose);
+      const olderBottom = Math.min(olderOpen, olderClose);
+
+      const newerTop = Math.max(newerOpen, newerClose);
+      const newerBottom = Math.min(newerOpen, newerClose);
+
+      const olderBullish = olderClose > olderOpen;
+      const olderBearish = olderClose < olderOpen;
+
+      const newerBullish = newerClose > newerOpen;
+      const newerBearish = newerClose < newerOpen;
+
+      if (olderBullish && newerBearish) {
+        latestFormation = {
+          type: "A-SHAPE",
+          first_candle: older.datetime,
+          second_candle: newer.datetime,
+          zone_top: Math.max(olderTop, newerTop),
+          zone_bottom: Math.min(olderTop, newerTop)
+        };
+        break;
+      }
+
+      if (olderBearish && newerBullish) {
+        latestFormation = {
+          type: "V-SHAPE",
+          first_candle: older.datetime,
+          second_candle: newer.datetime,
+          zone_top: Math.max(olderBottom, newerBottom),
+          zone_bottom: Math.min(olderBottom, newerBottom)
+        };
+        break;
+      }
+    }
+
+    res.json({
+      success: true,
+      symbol: "EUR/USD",
+      timeframe: "W1",
+      latest_formation: latestFormation
+    });
+
+  } catch (error) {
+    console.error("W1 detector error:", error.message);
+
+    res.status(500).json({
+      success: false,
+      message: "W1 detection failed."
+    });
+  }
+});
 app.listen(PORT, () => {
   console.log(`DEE SM SLK BOT running on port ${PORT}`);
 });
