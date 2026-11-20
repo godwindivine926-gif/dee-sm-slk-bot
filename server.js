@@ -292,6 +292,43 @@ app.post("/webhook", async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
+app.get("/test-market-data", async (req, res) => {
+  try {
+    const response = await axios.get(
+      "https://api.twelvedata.com/time_series",
+      {
+        params: {
+          symbol: "EUR/USD",
+          interval: "1day",
+          outputsize: 1,
+          apikey: process.env.TWELVE_DATA_API_KEY
+        }
+      }
+    );
+
+    if (response.data.status === "error") {
+      return res.status(400).json({
+        success: false,
+        message: response.data.message
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Twelve Data connected successfully!",
+      symbol: response.data.meta.symbol,
+      latest_candle: response.data.values[0]
+    });
+
+  } catch (error) {
+    console.error("Market data test failed:", error.message);
+
+    res.status(500).json({
+      success: false,
+      message: "Market data connection failed."
+    });
+  }
+});
 app.listen(PORT, () => {
   console.log(`DEE SM SLK BOT running on port ${PORT}`);
 });
