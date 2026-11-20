@@ -481,6 +481,16 @@ app.get("/test-w1-open-close", async (req, res) => {
       const firstClose = Number(first.close);
       const secondOpen = Number(second.open);
       const secondClose = Number(second.close);
+      if (first.datetime === "2026-11-02" || second.datetime === "2026-11-09") {
+  console.log("NOVEMBER PAIR:", {
+    first_date: first.datetime,
+    first_open: firstOpen,
+    first_close: firstClose,
+    second_date: second.datetime,
+    second_open: secondOpen,
+    second_close: secondClose
+  });
+      }
 
       const firstBullish = firstClose > firstOpen;
       const firstBearish = firstClose < firstOpen;
