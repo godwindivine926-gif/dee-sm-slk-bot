@@ -605,105 +605,118 @@ app.get("/test-d1-ebo", async (req, res) => {
       });
     }
 
-    // Exclude the newest potentially unfinished candle.
-    const candles = (response.data.values || []).slice(1).reverse();
+    const candles = (response.data.values || [])
+      .slice(1)
+      .reverse();
 
-    const bodyTop = candle =>
-      Math.max(Number(candle.open), Number(candle.close));
+    const bodyTop = c =>
+      Math.max(Number(c.open), Number(c.close));
 
-    const bodyBottom = candle =>
-      Math.min(Number(candle.open), Number(candle.close));
+    const bodyBottom = c =>
+      Math.min(Number(c.open), Number(c.close));
 
-    const swings = [];
+    let activeLL = null;
+    let pullbackHigh = null;
+    let protectedLH = null;
+    let bullishEBO = null;
+    const events = [];
 
-    // Find body-based swing candidates.
-    for (let i = 1; i < candles.length - 1; i++) {
+    for (let i = 1; i < candles.length; i++) {
+      const candle = candles[i];
       const previous = candles[i - 1];
-      const current = candles[i];
-      const next = candles[i + 1];
 
-      if (
-        bodyTop(current) > bodyTop(previous) &&
-        bodyTop(current) > bodyTop(next)
-      ) {
-        swings.push({
-          type: "HIGH",
-          date: current.datetime,
-          body_top: bodyTop(current),
-          body_bottom: bodyBottom(current)
-        });
+      const top = bodyTop(candle);
+      const bottom = bodyBottom(candle);
+      const close = Number(candle.close);
+
+      if (!activeLL) {
+        if (bottom < bodyBottom(previous)) {
+          activeLL = {
+            date: candle.datetime,
+            body_bottom: bottom
+          };
+
+          events.push({
+            type: "INITIAL_LL",
+            date: candle.datetime,
+            level: bottom
+          });
+        }
+
+        continue;
       }
 
-      if (
-        bodyBottom(current) < bodyBottom(previous) &&
-        bodyBottom(current) < bodyBottom(next)
-      ) {
-        swings.push({
-          type: "LOW",
-          date: current.datetime,
-          body_top: bodyTop(current),
-          body_bottom: bodyBottom(current)
+      if (!protectedLH && !pullbackHigh) {
+        pullbackHigh = {
+          date: candle.datetime,
+          body_top: top
+        };
+      } else if (!protectedLH && top > pullbackHigh.body_top) {
+        pullbackHigh = {
+          date: candle.datetime,
+          body_top: top
+        };
+      }
+
+      if (protectedLH && close > protectedLH.body_top) {
+        bullishEBO = {
+          date: candle.datetime,
+          close,
+          broken_level: protectedLH.body_top
+        };
+
+        events.push({
+          type: "BULLISH_EBO",
+          date: candle.datetime,
+          level: protectedLH.body_top
         });
+
+        protectedLH = null;
+        pullbackHigh = null;
+        activeLL = null;
+        continue;
+      }
+
+      if (bottom < activeLL.body_bottom) {
+        if (pullbackHigh) {
+          protectedLH = {
+            date: pullbackHigh.date,
+            body_top: pullbackHigh.body_top
+          };
+
+          events.push({
+            type: "PROTECTED_LH",
+            date: protectedLH.date,
+            level: protectedLH.body_top
+          });
+        }
+
+        activeLL = {
+          date: candle.datetime,
+          body_bottom: bottom
+        };
+
+        pullbackHigh = null;
       }
     }
-
-    // Keep both high and low if one candle forms both.
-    swings.sort((a, b) =>
-      a.date.localeCompare(b.date)
-    );
-
-    let previousHigh = null;
-    let previousLow = null;
-
-    const structure = swings.map(swing => {
-      let classification = "INITIAL";
-
-      if (swing.type === "HIGH") {
-        if (previousHigh !== null) {
-          classification =
-            swing.body_top > previousHigh ? "HH" :
-            swing.body_top < previousHigh ? "LH" :
-            "EQUAL HIGH";
-        }
-
-        previousHigh = swing.body_top;
-      }
-
-      if (swing.type === "LOW") {
-        if (previousLow !== null) {
-          classification =
-            swing.body_bottom > previousLow ? "HL" :
-            swing.body_bottom < previousLow ? "LL" :
-            "EQUAL LOW";
-        }
-
-        previousLow = swing.body_bottom;
-      }
-
-      return {
-        type: swing.type,
-        classification,
-        date: swing.date,
-        body_top: swing.body_top,
-        body_bottom: swing.body_bottom
-      };
-    });
 
     res.json({
       success: true,
       symbol,
       timeframe: "D1",
-      swing_count: structure.length,
-      structure,
-      note: "Preliminary body-based swing classification only. Protected swings and EBO are not yet confirmed."
+      active_LL: activeLL,
+      protected_LH: protectedLH,
+      bullish_EBO: bullishEBO,
+      events,
+      note: "Test detector. Validate structural sequence against chart before production use."
     });
 
   } catch (error) {
-    console.error("D1 structure error:", error.message);
+    console.error("D1 EBO error:", error.message);
 
     res.status(500).json({
       success: false,
-      message: "D1 structure detection failed."
+      message: "D1 EBO detection failed."
     });
   }
 });
