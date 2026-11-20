@@ -616,7 +616,7 @@ app.get("/test-d1-ebo", async (req, res) => {
 
     const swings = [];
 
-    // Identify preliminary body-based swing candidates.
+    // Find body-based swing candidates.
     for (let i = 1; i < candles.length - 1; i++) {
       const previous = candles[i - 1];
       const current = candles[i];
@@ -647,12 +647,11 @@ app.get("/test-d1-ebo", async (req, res) => {
       }
     }
 
-    // Put swing candidates in chronological order.
+    // Keep both high and low if one candle forms both.
     swings.sort((a, b) =>
       a.date.localeCompare(b.date)
     );
 
-    // Classify each swing against the previous swing of the same type.
     let previousHigh = null;
     let previousLow = null;
 
@@ -662,11 +661,9 @@ app.get("/test-d1-ebo", async (req, res) => {
       if (swing.type === "HIGH") {
         if (previousHigh !== null) {
           classification =
-            swing.body_top > previousHigh
-              ? "HH"
-              : swing.body_top < previousHigh
-              ? "LH"
-              : "EQUAL HIGH";
+            swing.body_top > previousHigh ? "HH" :
+            swing.body_top < previousHigh ? "LH" :
+            "EQUAL HIGH";
         }
 
         previousHigh = swing.body_top;
@@ -675,17 +672,16 @@ app.get("/test-d1-ebo", async (req, res) => {
       if (swing.type === "LOW") {
         if (previousLow !== null) {
           classification =
-            swing.body_bottom > previousLow
-              ? "HL"
-              : swing.body_bottom < previousLow
-              ? "LL"
-              : "EQUAL LOW";
+            swing.body_bottom > previousLow ? "HL" :
+            swing.body_bottom < previousLow ? "LL" :
+            "EQUAL LOW";
         }
 
         previousLow = swing.body_bottom;
       }
 
       return {
+        type: swing.type,
         classification,
         date: swing.date,
         body_top: swing.body_top,
@@ -698,7 +694,8 @@ app.get("/test-d1-ebo", async (req, res) => {
       symbol,
       timeframe: "D1",
       swing_count: structure.length,
-      structure
+      structure,
+      note: "Preliminary body-based swing classification only. Protected swings and EBO are not yet confirmed."
     });
 
   } catch (error) {
