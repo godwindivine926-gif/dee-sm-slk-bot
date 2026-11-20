@@ -582,6 +582,76 @@ app.get("/test-d1-candles", async (req, res) => {
     });
   }
 });
+app.get("/test-d1-ebo", async (req, res) => {
+  try {
+    const response = await axios.get(
+      "https://api.twelvedata.com/time_series",
+      {
+        params: {
+          symbol: req.query.symbol || "EUR/USD",
+          interval: "1day",
+          outputsize: 100,
+          apikey: process.env.TWELVE_DATA_API_KEY
+        }
+      }
+    );
+
+    const candles = (response.data.values || []).slice(1);
+
+    const bodyTop = candle =>
+      Math.max(Number(candle.open), Number(candle.close));
+
+    const bodyBottom = candle =>
+      Math.min(Number(candle.open), Number(candle.close));
+
+    const swings = [];
+
+    // Identify candidate swing highs and lows using candle bodies.
+    for (let i = 1; i < candles.length - 1; i++) {
+      const previous = candles[i - 1];
+      const current = candles[i];
+      const next = candles[i + 1];
+
+      if (
+        bodyTop(current) > bodyTop(previous) &&
+        bodyTop(current) > bodyTop(next)
+      ) {
+        swings.push({
+          type: "SWING HIGH",
+          date: current.datetime,
+          body_top: bodyTop(current),
+          body_bottom: bodyBottom(current)
+        });
+      }
+
+      if (
+        bodyBottom(current) < bodyBottom(previous) &&
+        bodyBottom(current) < bodyBottom(next)
+      ) {
+        swings.push({
+          type: "SWING LOW",
+          date: current.datetime,
+          body_top: bodyTop(current),
+          body_bottom: bodyBottom(current)
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      symbol: req.query.symbol || "EUR/USD",
+      timeframe: "D1",
+      swing_count: swings.length,
+      swings: swings
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
 app.listen(PORT, () => {
   console.log(`DEE SM SLK BOT running on port ${PORT}`);
 });
