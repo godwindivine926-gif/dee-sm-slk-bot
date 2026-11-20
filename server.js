@@ -219,12 +219,22 @@ app.post("/webhook", async (req, res) => {
   const start = new Date(previousSunday.getTime() - 60 * 60 * 1000);
   const end = new Date(thisSunday.getTime() - 60 * 60 * 1000);
 
-  const result = await databaseRequest("get", {
-    chat_id: `eq.${chatId}`,
-    event_time: `gte.${start.toISOString()}`,
-    and: `(event_time.lt.${end.toISOString()})`,
-    order: "event_time.asc"
-  });
+  const result = await axios.get(
+  `${SUPABASE_URL}/rest/v1/storyline_events`,
+  {
+    params: {
+      select: "*",
+      chat_id: `eq.${chatId}`,
+      event_time: `gte.${start.toISOString()}`,
+      and: `(event_time.lt.${end.toISOString()})`,
+      order: "event_time.asc"
+    },
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`
+    }
+  }
+);
 
   if (result.data.length === 0) {
     return await sendMessage(
