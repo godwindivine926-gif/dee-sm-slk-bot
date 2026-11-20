@@ -535,7 +535,7 @@ app.get("/test-w1-open-close", async (req, res) => {
 
     res.json({
       success: true,
-      symbol: "EUR/USD",
+      symbol: req.query.symbol || "EUR/USD",
       timeframe: "W1",
       total_formations: formations.length,
       formations: formations
