@@ -202,6 +202,67 @@ app.post("/webhook", async (req, res) => {
     }
 
     // ==================== /check ====================
+    if (command === "/weekly") {
+  const now = new Date();
+
+  // Calculate previous Sunday to Saturday in WAT
+  const watNow = new Date(now.getTime() + 60 * 60 * 1000);
+  const day = watNow.getUTCDay();
+
+  const thisSunday = new Date(watNow);
+  thisSunday.setUTCDate(watNow.getUTCDate() - day);
+  thisSunday.setUTCHours(0, 0, 0, 0);
+
+  const previousSunday = new Date(thisSunday);
+  previousSunday.setUTCDate(thisSunday.getUTCDate() - 7);
+
+  const start = new Date(previousSunday.getTime() - 60 * 60 * 1000);
+  const end = new Date(thisSunday.getTime() - 60 * 60 * 1000);
+
+  const result = await databaseRequest("get", {
+    chat_id: `eq.${chatId}`,
+    event_time: `gte.${start.toISOString()}`,
+    and: `(event_time.lt.${end.toISOString()})`,
+    order: "event_time.asc"
+  });
+
+  if (result.data.length === 0) {
+    return await sendMessage(
+      chatId,
+      "📊 PREVIOUS WEEKLY REPORT\n\nNo storyline events were recorded last week (Sunday–Saturday)."
+    );
+  }
+
+  const groups = {
+    confirmed: "🟢 CONFIRMED STORYLINES",
+    developing: "🟡 DEVELOPING STORYLINES",
+    invalidated: "🔴 INVALIDATED STORYLINES"
+  };
+
+  let report = "📊 PREVIOUS WEEKLY REPORT\nSunday – Saturday\n";
+
+  for (const [status, heading] of Object.entries(groups)) {
+    const events = result.data.filter(
+      event => event.status.toLowerCase() === status
+    );
+
+    report += `\n${heading}\n`;
+
+    if (events.length === 0) {
+      report += "None recorded.\n";
+      continue;
+    }
+
+    for (const event of events) {
+      report += `\n${event.symbol} — ${event.direction}\n`;
+      report += `Timeframe: ${event.timeframe}\n`;
+      report += `Breakout: ${event.breakout_type || "Not specified"}\n`;
+      report += `${JSON.stringify(event.details)}\n`;
+    }
+  }
+
+  return await sendMessage(chatId, report);
+    }
     if (command === "/check") {
       return await sendMessage(
         chatId,
