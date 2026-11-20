@@ -445,6 +445,7 @@ app.get("/test-w1-open-close", async (req, res) => {
         params: {
           symbol: req.query.symbol || "EUR/USD",
           interval: "1week",
+          latest_candle_dates: candles.slice(0, 10).map(candle => candle.datetime),
           outputsize: 100,
           apikey: process.env.TWELVE_DATA_API_KEY
         }
