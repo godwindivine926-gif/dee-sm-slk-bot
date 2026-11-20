@@ -444,8 +444,7 @@ app.get("/test-w1-open-close", async (req, res) => {
       {
         params: {
           symbol: req.query.symbol || "EUR/USD",
-          interval: "1week",
-          latest_candle_dates: candles.slice(0, 10).map(candle => candle.datetime),
+          interval: "1week"
           outputsize: 100,
           apikey: process.env.TWELVE_DATA_API_KEY
         }
@@ -538,6 +537,7 @@ app.get("/test-w1-open-close", async (req, res) => {
       success: true,
       symbol: req.query.symbol || "EUR/USD",
       timeframe: "W1",
+      latest_candle_dates: candles.slice(0, 10).map(candle => candle.datetime),
       total_formations: formations.length,
       formations: formations
     });
