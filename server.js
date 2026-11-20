@@ -605,9 +605,7 @@ app.get("/test-d1-ebo", async (req, res) => {
       });
     }
 
-    const candles = (response.data.values || [])
-      .slice(1)
-      .reverse();
+    const candles = (response.data.values || []).slice(1).reverse();
 
     const bodyTop = c =>
       Math.max(Number(c.open), Number(c.close));
@@ -624,7 +622,6 @@ app.get("/test-d1-ebo", async (req, res) => {
     for (let i = 1; i < candles.length; i++) {
       const candle = candles[i];
       const previous = candles[i - 1];
-
       const top = bodyTop(candle);
       const bottom = bodyBottom(candle);
       const close = Number(candle.close);
@@ -635,29 +632,19 @@ app.get("/test-d1-ebo", async (req, res) => {
             date: candle.datetime,
             body_bottom: bottom
           };
-
-          events.push({
-            type: "INITIAL_LL",
-            date: candle.datetime,
-            level: bottom
-          });
         }
-
         continue;
       }
 
-      if (!protectedLH && !pullbackHigh) {
-        pullbackHigh = {
-          date: candle.datetime,
-          body_top: top
-        };
-      } else if (!protectedLH && top > pullbackHigh.body_top) {
+      // Track the highest body during the pullback.
+      if (!pullbackHigh || top > pullbackHigh.body_top) {
         pullbackHigh = {
           date: candle.datetime,
           body_top: top
         };
       }
 
+      // Bullish EBO: body close above protected LH.
       if (protectedLH && close > protectedLH.body_top) {
         bullishEBO = {
           date: candle.datetime,
@@ -672,11 +659,12 @@ app.get("/test-d1-ebo", async (req, res) => {
         });
 
         protectedLH = null;
-        pullbackHigh = null;
         activeLL = null;
+        pullbackHigh = null;
         continue;
       }
 
+      // A new LL confirms the pullback high as protected LH.
       if (bottom < activeLL.body_bottom) {
         if (pullbackHigh) {
           protectedLH = {
@@ -705,10 +693,10 @@ app.get("/test-d1-ebo", async (req, res) => {
       symbol,
       timeframe: "D1",
       active_LL: activeLL,
-      protected_LH: protectedLH,
+      latest_protected_LH: protectedLH,
       bullish_EBO: bullishEBO,
       events,
-      note: "Test detector. Validate structural sequence against chart before production use."
+      note: "Experimental sequential body-based detector. Structural swings still require chart validation."
     });
 
   } catch (error) {
