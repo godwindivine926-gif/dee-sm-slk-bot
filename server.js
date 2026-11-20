@@ -551,6 +551,37 @@ app.get("/test-w1-open-close", async (req, res) => {
     });
   }
 });
+app.get("/test-d1-candles", async (req, res) => {
+  try {
+    const response = await axios.get(
+      "https://api.twelvedata.com/time_series",
+      {
+        params: {
+          symbol: req.query.symbol || "EUR/USD",
+          interval: "1day",
+          outputsize: 100,
+          apikey: process.env.TWELVE_DATA_API_KEY
+        }
+      }
+    );
+
+    const candles = response.data.values || [];
+
+    res.json({
+      success: true,
+      symbol: req.query.symbol || "EUR/USD",
+      timeframe: "D1",
+      latest_candle_dates: candles.slice(0, 10).map(candle => candle.datetime),
+      candles: candles.slice(1, 6)
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
 app.listen(PORT, () => {
   console.log(`DEE SM SLK BOT running on port ${PORT}`);
 });
