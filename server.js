@@ -502,7 +502,7 @@ app.get("/test-w1-open-close", async (req, res) => {
       if (
         firstBullish &&
         secondBullish &&
-        secondOpen > firstClose
+        secondOpen >= firstClose
       ) {
         formations.push({
           type: "BULLISH OPEN/CLOSE",
@@ -519,7 +519,7 @@ app.get("/test-w1-open-close", async (req, res) => {
       if (
         firstBearish &&
         secondBearish &&
-        secondOpen < firstClose
+        secondOpen <= firstClose
       ) {
         formations.push({
           type: "BEARISH OPEN/CLOSE",
