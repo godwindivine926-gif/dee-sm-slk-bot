@@ -308,7 +308,7 @@ app.get("/test-market-data", async (req, res) => {
           params: {
             symbol: "EUR/USD",
             interval: timeframe.interval,
-            outputsize: 1,
+            outputsize: 100,
             apikey: process.env.TWELVE_DATA_API_KEY
           }
         }
