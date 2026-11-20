@@ -443,7 +443,7 @@ app.get("/test-w1-open-close", async (req, res) => {
       "https://api.twelvedata.com/time_series",
       {
         params: {
-          symbol: "EUR/USD",
+          symbol: req.query.symbol || "EUR/USD",
           interval: "1week",
           outputsize: 100,
           apikey: process.env.TWELVE_DATA_API_KEY
