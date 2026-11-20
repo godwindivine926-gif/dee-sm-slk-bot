@@ -584,11 +584,13 @@ app.get("/test-d1-candles", async (req, res) => {
 });
 app.get("/test-d1-ebo", async (req, res) => {
   try {
+    const symbol = req.query.symbol || "EUR/USD";
+
     const response = await axios.get(
       "https://api.twelvedata.com/time_series",
       {
         params: {
-          symbol: req.query.symbol || "EUR/USD",
+          symbol,
           interval: "1day",
           outputsize: 100,
           apikey: process.env.TWELVE_DATA_API_KEY
@@ -596,7 +598,15 @@ app.get("/test-d1-ebo", async (req, res) => {
       }
     );
 
-    const candles = (response.data.values || []).slice(1);
+    if (response.data.status === "error") {
+      return res.status(400).json({
+        success: false,
+        message: response.data.message
+      });
+    }
+
+    // Exclude the newest potentially unfinished candle.
+    const candles = (response.data.values || []).slice(1).reverse();
 
     const bodyTop = candle =>
       Math.max(Number(candle.open), Number(candle.close));
@@ -606,7 +616,7 @@ app.get("/test-d1-ebo", async (req, res) => {
 
     const swings = [];
 
-    // Identify candidate swing highs and lows using candle bodies.
+    // Identify preliminary body-based swing candidates.
     for (let i = 1; i < candles.length - 1; i++) {
       const previous = candles[i - 1];
       const current = candles[i];
@@ -617,7 +627,7 @@ app.get("/test-d1-ebo", async (req, res) => {
         bodyTop(current) > bodyTop(next)
       ) {
         swings.push({
-          type: "SWING HIGH",
+          type: "HIGH",
           date: current.datetime,
           body_top: bodyTop(current),
           body_bottom: bodyBottom(current)
@@ -629,7 +639,7 @@ app.get("/test-d1-ebo", async (req, res) => {
         bodyBottom(current) < bodyBottom(next)
       ) {
         swings.push({
-          type: "SWING LOW",
+          type: "LOW",
           date: current.datetime,
           body_top: bodyTop(current),
           body_bottom: bodyBottom(current)
@@ -637,18 +647,66 @@ app.get("/test-d1-ebo", async (req, res) => {
       }
     }
 
+    // Put swing candidates in chronological order.
+    swings.sort((a, b) =>
+      a.date.localeCompare(b.date)
+    );
+
+    // Classify each swing against the previous swing of the same type.
+    let previousHigh = null;
+    let previousLow = null;
+
+    const structure = swings.map(swing => {
+      let classification = "INITIAL";
+
+      if (swing.type === "HIGH") {
+        if (previousHigh !== null) {
+          classification =
+            swing.body_top > previousHigh
+              ? "HH"
+              : swing.body_top < previousHigh
+              ? "LH"
+              : "EQUAL HIGH";
+        }
+
+        previousHigh = swing.body_top;
+      }
+
+      if (swing.type === "LOW") {
+        if (previousLow !== null) {
+          classification =
+            swing.body_bottom > previousLow
+              ? "HL"
+              : swing.body_bottom < previousLow
+              ? "LL"
+              : "EQUAL LOW";
+        }
+
+        previousLow = swing.body_bottom;
+      }
+
+      return {
+        classification,
+        date: swing.date,
+        body_top: swing.body_top,
+        body_bottom: swing.body_bottom
+      };
+    });
+
     res.json({
       success: true,
-      symbol: req.query.symbol || "EUR/USD",
+      symbol,
       timeframe: "D1",
-      swing_count: swings.length,
-      swings: swings
+      swing_count: structure.length,
+      structure
     });
 
   } catch (error) {
+    console.error("D1 structure error:", error.message);
+
     res.status(500).json({
       success: false,
-      error: error.message
+      message: "D1 structure detection failed."
     });
   }
 });
