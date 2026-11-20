@@ -437,6 +437,109 @@ app.get("/test-w1-av", async (req, res) => {
     });
   }
 });
+app.get("/test-w1-open-close", async (req, res) => {
+  try {
+    const response = await axios.get(
+      "https://api.twelvedata.com/time_series",
+      {
+        params: {
+          symbol: "EUR/USD",
+          interval: "1week",
+          outputsize: 100,
+          apikey: process.env.TWELVE_DATA_API_KEY
+        }
+      }
+    );
+
+    if (response.data.status === "error") {
+      return res.status(400).json({
+        success: false,
+        message: response.data.message
+      });
+    }
+
+    const candles = response.data.values;
+
+    if (!candles || candles.length < 3) {
+      return res.json({
+        success: false,
+        message: "Not enough Weekly candles."
+      });
+    }
+
+    // Exclude the newest potentially unfinished candle.
+    const closedCandles = candles.slice(1);
+
+    const formations = [];
+
+    // Twelve Data returns candles newest first.
+    for (let i = 0; i < closedCandles.length - 1; i++) {
+      const first = closedCandles[i + 1];
+      const second = closedCandles[i];
+
+      const firstOpen = Number(first.open);
+      const firstClose = Number(first.close);
+      const secondOpen = Number(second.open);
+      const secondClose = Number(second.close);
+
+      const firstBullish = firstClose > firstOpen;
+      const firstBearish = firstClose < firstOpen;
+
+      const secondBullish = secondClose > secondOpen;
+      const secondBearish = secondClose < secondOpen;
+
+      // Bullish Open/Close
+      if (
+        firstBullish &&
+        secondBullish &&
+        secondOpen > firstClose
+      ) {
+        formations.push({
+          type: "BULLISH OPEN/CLOSE",
+          first_candle: first.datetime,
+          second_candle: second.datetime,
+          first_close: firstClose,
+          second_open: secondOpen,
+          gap_bottom: firstClose,
+          gap_top: secondOpen
+        });
+      }
+
+      // Bearish Open/Close
+      if (
+        firstBearish &&
+        secondBearish &&
+        secondOpen < firstClose
+      ) {
+        formations.push({
+          type: "BEARISH OPEN/CLOSE",
+          first_candle: first.datetime,
+          second_candle: second.datetime,
+          first_close: firstClose,
+          second_open: secondOpen,
+          gap_bottom: secondOpen,
+          gap_top: firstClose
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      symbol: "EUR/USD",
+      timeframe: "W1",
+      total_formations: formations.length,
+      formations: formations
+    });
+
+  } catch (error) {
+    console.error("W1 Open/Close error:", error.message);
+
+    res.status(500).json({
+      success: false,
+      message: "W1 Open/Close detection failed."
+    });
+  }
+});
 app.listen(PORT, () => {
   console.log(`DEE SM SLK BOT running on port ${PORT}`);
 });
