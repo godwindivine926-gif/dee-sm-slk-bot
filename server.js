@@ -1476,18 +1476,20 @@ app.post("/webhook", async (req, res) => {
     const command = parts[0].split("@")[0].toLowerCase();
     const argument = parts[1];
 
-        if (command === "/start") {
+            if (command === "/start") {
       await sendMessage(
         chatId,
-        `<b>Welcome to DEE SM SLK BOT! 📊</b>\n\n` +
-          `Your personal market monitoring assistant.\n\n` +
-          `Structure | Liquidity | Key Levels\n\n` +
-          `<b>BIAS ≠ ENTRY.</b>\n` +
-          `This bot provides market context, not entry signals.\n\n` +
-          `Type /help to see available commands.`
+        `<b>Welcome to DEE SM SLK BOT — what's on your radar?</b>\n\n` +
+          `- <b>Weekly focus</b> – use <code>/weekly</code> to see last week's saved events.\n` +
+          `- <b>Market reads</b> – use <code>/check GBPUSD</code> for W1, D1 & H4 structure, key levels, and EBOs.\n` +
+          `- <b>Watchlist</b> – use <code>/add</code>, <code>/remove</code>, or <code>/watchlist</code> to manage your pairs.\n` +
+          `- <b>Monitor control</b> – use <code>/pause</code> or <code>/resume</code> to toggle automated scans.\n\n` +
+          `<i>BIAS ≠ ENTRY — market context only, not an entry signal.</i>\n\n` +
+          `Type <code>/help</code> anytime to see all commands or run <code>/check GBPUSD</code> to start.`
       );
       return;
-        }
+            }
+    
     
         if (command === "/help") {
       await sendMessage(
