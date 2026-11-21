@@ -822,8 +822,7 @@ app.get("/test-w1-open-close", async (req, res) => {
     const symbol = normalizeSymbol(req.query.symbol);
 
     const raw = await getMarketCandles(symbol, "1week", 100);
-const filtered = filterCompletedWeeklyCandles(raw);
-const candles = filtered.candles;
+    const candles = raw.slice(1).reverse();
 
     const formations = [];
 
@@ -834,6 +833,12 @@ const candles = filtered.candles;
       const firstColor = candleColor(first);
       const secondColor = candleColor(second);
 
+      const firstClose = Number(first.close);
+      const secondOpen = Number(second.open);
+
+      // Actual gap required; exact equality does not count.
+      if (firstClose === secondOpen) continue;
+
       if (
         firstColor === "BULLISH" &&
         secondColor === "BULLISH"
@@ -842,8 +847,9 @@ const candles = filtered.candles;
           type: "BULLISH-OPEN-CLOSE",
           first_candle: first.datetime,
           second_candle: second.datetime,
-          first_close: Number(first.close),
-          second_open: Number(second.open)
+          first_close: firstClose,
+          second_open: secondOpen,
+          gap: secondOpen - firstClose
         });
       }
 
@@ -855,8 +861,9 @@ const candles = filtered.candles;
           type: "BEARISH-OPEN-CLOSE",
           first_candle: first.datetime,
           second_candle: second.datetime,
-          first_close: Number(first.close),
-          second_open: Number(second.open)
+          first_close: firstClose,
+          second_open: secondOpen,
+          gap: secondOpen - firstClose
         });
       }
     }
