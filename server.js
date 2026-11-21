@@ -382,6 +382,131 @@ function identifySwings(candles) {
 }
 
 // =====================================
+// DAILY KEY-LEVEL DETECTOR
+// =====================================
+
+function detectDailyKeyLevels(candles) {
+  const levels = [];
+
+  for (let i = 1; i < candles.length; i++) {
+    const first = candles[i - 1];
+    const second = candles[i];
+
+    const firstColor = candleColor(first);
+    const secondColor = candleColor(second);
+
+    // A-SHAPE: Bullish followed by bearish.
+    if (
+      firstColor === "BULLISH" &&
+      secondColor === "BEARISH"
+    ) {
+      levels.push({
+        type: "A-SHAPE",
+        bias: "BEARISH",
+        first_candle: first.datetime,
+        second_candle: second.datetime,
+        formation_index: i,
+        low: Math.min(
+          bodyTop(first),
+          bodyTop(second)
+        ),
+        high: Math.max(
+          bodyTop(first),
+          bodyTop(second)
+        ),
+        status: "FORMED"
+      });
+    }
+
+    // V-SHAPE: Bearish followed by bullish.
+    if (
+      firstColor === "BEARISH" &&
+      secondColor === "BULLISH"
+    ) {
+      levels.push({
+        type: "V-SHAPE",
+        bias: "BULLISH",
+        first_candle: first.datetime,
+        second_candle: second.datetime,
+        formation_index: i,
+        low: Math.min(
+          bodyBottom(first),
+          bodyBottom(second)
+        ),
+        high: Math.max(
+          bodyBottom(first),
+          bodyBottom(second)
+        ),
+        status: "FORMED"
+      });
+    }
+
+    // OPEN/CLOSE: Two consecutive candles of the same colour.
+    if (
+      firstColor === secondColor &&
+      firstColor !== "DOJI"
+    ) {
+      const firstClose = Number(first.close);
+      const secondOpen = Number(second.open);
+
+      if (firstClose !== secondOpen) {
+        levels.push({
+          type: "OPEN-CLOSE",
+          bias: firstColor === "BULLISH"
+            ? "BULLISH"
+            : "BEARISH",
+          first_candle: first.datetime,
+          second_candle: second.datetime,
+          formation_index: i,
+          low: Math.min(firstClose, secondOpen),
+          high: Math.max(firstClose, secondOpen),
+          status: "FORMED"
+        });
+      }
+    }
+  }
+
+  // Track subsequent body-close violations of original A/V levels.
+  for (const level of levels) {
+    if (
+      level.type !== "A-SHAPE" &&
+      level.type !== "V-SHAPE"
+    ) continue;
+
+    let violations = 0;
+    const violationDates = [];
+
+    for (
+      let i = level.formation_index + 1;
+      i < candles.length;
+      i++
+    ) {
+      const candle = candles[i];
+      const close = Number(candle.close);
+
+      const disrespected =
+        level.type === "A-SHAPE"
+          ? close > level.high
+          : close < level.low;
+
+      if (disrespected) {
+        violations++;
+        violationDates.push(candle.datetime);
+      }
+    }
+
+    level.disrespect_count = violations;
+    level.disrespect_dates = violationDates;
+
+    if (violations >= 2) {
+      level.status = "QMR";
+    }
+  }
+
+  return levels;
+}
+
+// =====================================
 // REBUILT D1 STRUCTURE DETECTOR
 // =====================================
 
