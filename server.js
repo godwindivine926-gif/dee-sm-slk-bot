@@ -1028,8 +1028,7 @@ app.post("/webhook", async (req, res) => {
   );
 }).join("\n")
       : "None";
-
-    return `<b>${status} LEVELS</b>\n${details}`;
+return `<b>${status} LEVELS</b>\n${details}`;
   })
   .join("\n\n");
         const reactionText = result.keyLevelReactions.length
