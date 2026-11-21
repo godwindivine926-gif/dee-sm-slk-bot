@@ -1655,17 +1655,31 @@ app.post("/webhook", async (req, res) => {
           `<b>Rejected on ${d1h4Setup.htf_contact_date}</b>\n` +
           `<b>Trend ${d1Bias !== "NEUTRAL" ? `aligned with D1 (${d1Bias})` : "neutral on D1"}</b>`
         : `D1→H4: No active setup.`;
+      const useD1H4 = Boolean(d1h4Setup?.ebo);
+      const activeLeg = useD1H4 ? "D1 → H4" : "W1 → D1";
+      const activeBias = useD1H4 ? d1Bias : w1Bias;
 
-      const dirLabel =
-        badge === "🔴"
+      const resolvedDirection =
+        activeBias === "BULLISH"
+          ? "BUY"
+          : activeBias === "BEARISH"
+          ? "SELL"
+          : d1h4Setup?.ebo?.type?.startsWith("BULLISH") || w1d1Setup?.ebo?.type?.startsWith("BULLISH")
+          ? "BUY"
+          : d1h4Setup?.ebo?.type?.startsWith("BEARISH") || w1d1Setup?.ebo?.type?.startsWith("BEARISH")
+          ? "SELL"
+          : null;
+
+      const headerPrefix =
+        resolvedDirection === "SELL"
           ? "🚨 <b>SELL"
-          : badge === "🟢"
+          : resolvedDirection === "BUY"
           ? "🟢 <b>BUY"
           : `${badge} <b>${symbol}`;
 
-      const legPair = d1h4Setup?.ebo ? "D1→H4" : "W1→D1";
-      const activeBody = d1h4Setup?.ebo ? d1h4Block : w1d1Block;
-      const hasConfirmedBo = Boolean(d1h4Setup?.ebo || w1d1Setup?.ebo);
+      const headerLine = resolvedDirection
+        ? `${headerPrefix} · ${symbol} · ${activeLeg}</b>`
+        : `${headerPrefix} — MARKET READ</b>`;
 
       const alignmentNote =
         w1Bias !== "NEUTRAL" && d1Bias !== "NEUTRAL"
@@ -1675,14 +1689,13 @@ app.post("/webhook", async (req, res) => {
           : "";
 
       const msg =
-        `${dirLabel} · ${symbol} · ${legPair}</b>\n` +
-        `${hasConfirmedBo ? "External breakout confirmed" : "Structure monitoring"}\n\n` +
-        `${activeBody}\n` +
+        `${headerLine}\n` +
+        `${useD1H4 || w1d1Setup?.ebo ? "External breakout confirmed" : "Structure monitoring"}\n\n` +
+        `${useD1H4 ? d1h4Block : w1d1Block}\n` +
         (alignmentNote ? `${alignmentNote}\n\n` : `\n`) +
         `All times shown are candle open times.\n\n` +
         `⚠️ Not an entry signal. Bias only — wait for your entry model.\n\n` +
         `Sent ${formatWatTimestamp()}`;
-                              
       await sendMessage(chatId, msg, buildStorylineInlineKeyboard(symbol));
       return;
         }
