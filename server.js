@@ -2106,7 +2106,7 @@ async function scanWatchlistOnce() {
       const data = marketCache.get(symbol);
       if (!data) continue;
 
-      const w1D1Confirmed = (data.w1ToD1?.all_setups || []).filter(s => s.ebo);
+            const w1D1Confirmed = (data.w1ToD1?.all_setups || []).filter(s => s.ebo);
       for (const setup of w1D1Confirmed) {
         const shouldAlert = await recordStorylineEvent(
           chatId,
@@ -2115,7 +2115,7 @@ async function scanWatchlistOnce() {
           setup.ebo,
           { suppressAlert: isInitialSeedRun }
         );
-                if (shouldAlert) {
+        if (shouldAlert) {
           await sendMessage(
             chatId,
             buildCascadeAlertMessage(symbol, "W1 > D1", setup),
@@ -2133,7 +2133,7 @@ async function scanWatchlistOnce() {
           setup.ebo,
           { suppressAlert: isInitialSeedRun }
         );
-                if (shouldAlert) {
+        if (shouldAlert) {
           await sendMessage(
             chatId,
             buildCascadeAlertMessage(symbol, "D1 > H4", setup),
@@ -2144,6 +2144,7 @@ async function scanWatchlistOnce() {
     }
 
     hasCompletedInitialSeed = true;
+    
   } catch (err) {
     console.error("Watchlist scan error:", err.response?.data || err.message);
   } finally {
