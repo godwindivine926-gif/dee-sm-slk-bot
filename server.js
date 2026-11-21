@@ -300,7 +300,15 @@ function buildWeeklyCandlesFromDaily(d1Candles = []) {
 
   const groups = new Map();
   for (const candle of d1Candles) {
-    if (!isValidOhlccCandle(candle)) continue;
+        if (
+      !candle ||
+      !candle.datetime ||
+      ![candle.open, candle.high, candle.low, candle.close].every((v) =>
+        Number.isFinite(Number(v))
+      )
+    ) {
+      continue;
+        }
     const dateStr = String(candle.datetime).slice(0, 10);
     const weekStart = getMondayUtcDate(dateStr);
 
