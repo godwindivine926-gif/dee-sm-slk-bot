@@ -1790,6 +1790,7 @@ app.post("/webhook", async (req, res) => {
         ? `✅ <b>4H aligned:</b> BO @ <b>${formatPrice(d1h4Setup.ebo.broken_pullback_level)}</b> (${d1h4Setup.ebo.date || "confirmed"})`
         : `⏳ <b>4H not aligned yet</b> — waiting for 4H external breakout`;
 
+      const w1ToD1Ebo = w1ToD1?.latest_setup?.ebo;
       const storylineEmoji = d1Bias === "BULLISH" ? "🟢" : "🔴";
 const storylineDir = d1Bias === "BULLISH" ? "BULLISH" : "BEARISH";
 const breakScopeLabel = d1h4Setup?.ebo ? "EXTERNAL BREAKOUT" : "INTERNAL BREAKOUT";
