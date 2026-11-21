@@ -1315,16 +1315,13 @@ function detectLowerTimeframePullbackBreak({
   lowerCandles
 }) {
     
-
-    if (contactEvent.bias === "BULLISH" && close > lastPullback.level) {
-      confirmedEbo = {
-        type: `BULLISH_${lowerTimeframe}_EBO`,
-        date: candle.datetime,
-        close,
-        broken_pullback_level: lastPullback.level,
-        pullback_date: lastPullback.date
-      };
-    }
+function detectLowerTimeframePullbackBreak({
+  higherTimeframe,
+  lowerTimeframe,
+  contactEvent,
+  lowerCandles
+}) {
+  const lowerSwings = identifySwings(lowerCandles);
   }
   const lowerSwings = identifySwings(lowerCandles);
   const contactCutoffMs = toTimestampMs(contactEvent.contact_date, true);
