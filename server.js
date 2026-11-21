@@ -909,6 +909,129 @@ function detectH4Structure(candles) {
     const candle = candles[i];
     const close = Number(candle.close);
 
+    // 1. Check EBO using completed candle-body close only (no wicks)
+    if (
+      protectedLH &&
+      i > protectedLH.index &&
+      close > protectedLH.level
+    ) {
+      events.push({
+        type: "BULLISH_EBO",
+        date: candle.datetime,
+        close,
+        broken_level: protectedLH.level,
+        protected_lh_date: protectedLH.date
+      });
+
+      protectedLH = null;
+      pendingLH = null;
+    }
+
+    if (
+      protectedHL &&
+      i > protectedHL.index &&
+      close < protectedHL.level
+    ) {
+      events.push({
+        type: "BEARISH_EBO",
+        date: candle.datetime,
+        close,
+        broken_level: protectedHL.level,
+        protected_hl_date: protectedHL.date
+      });
+
+      protectedHL = null;
+      pendingHL = null;
+    }
+
+    // 2. Confirm new LL (candle-body close below previous swing low)
+    // A pending LH formed during bearish structure becomes protected LH;
+    // an already-confirmed protected LH is retained unless broken by body close.
+    if (
+      latestSwingLow &&
+      i > latestSwingLow.index &&
+      close < latestSwingLow.level &&
+      (!bearishLL || bearishLL.broken_swing_low !== latestSwingLow.level)
+    ) {
+      if (direction === "BEARISH" && pendingLH && i > pendingLH.index) {
+        protectedLH = {
+          ...pendingLH,
+          confirmation_date: candle.datetime
+        };
+        pendingLH = null;
+
+        events.push({
+          type: "PROTECTED_LH_CONFIRMED",
+          date: protectedLH.date,
+          level: protectedLH.level,
+          confirmation_date: candle.datetime
+        });
+      }
+
+      bearishLL = {
+        date: candle.datetime,
+        index: i,
+        level: bodyBottom(candle),
+        broken_swing_low: latestSwingLow.level
+      };
+
+      direction = "BEARISH";
+      bullishHH = null;
+      pendingHL = null;
+
+      events.push({
+        type: "LL_CONFIRMED",
+        date: candle.datetime,
+        level: bearishLL.level,
+        broken_swing_low: latestSwingLow.level
+      });
+    }
+
+    // 3. Confirm new HH (candle-body close above previous swing high)
+    // A pending HL formed during bullish structure becomes protected HL;
+    // an already-confirmed protected HL is retained unless broken by body close.
+    if (
+      latestSwingHigh &&
+      i > latestSwingHigh.index &&
+      close > latestSwingHigh.level &&
+      (!bullishHH || bullishHH.broken_swing_high !== latestSwingHigh.level)
+    ) {
+      if (direction === "BULLISH" && pendingHL && i > pendingHL.index) {
+        protectedHL = {
+          ...pendingHL,
+          confirmation_date: candle.datetime
+        };
+        pendingHL = null;
+
+        events.push({
+          type: "PROTECTED_HL_CONFIRMED",
+          date: protectedHL.date,
+          level: protectedHL.level,
+          confirmation_date: candle.datetime
+        });
+      }
+
+      bullishHH = {
+        date: candle.datetime,
+        index: i,
+        level: bodyTop(candle),
+        broken_swing_high: latestSwingHigh.level
+      };
+
+      direction = "BULLISH";
+      bearishLL = null;
+      pendingLH = null;
+
+      events.push({
+        type: "HH_CONFIRMED",
+        date: candle.datetime,
+        level: bullishHH.level,
+        broken_swing_high: latestSwingHigh.level
+      });
+    }
+
+    // 4. Register swings formed on this candle
+    // New swings become pendingLH / pendingHL without replacing protected swings.
     const formedSwings = swings.filter(swing => swing.index === i);
 
     for (const swing of formedSwings) {
@@ -926,128 +1049,6 @@ function detectH4Structure(candles) {
         }
       }
     }
-
-    if (protectedHL && i > protectedHL.index && close < protectedHL.level) {
-      events.push({
-        type: "BEARISH_EBO",
-        date: candle.datetime,
-        close,
-        broken_level: protectedHL.level
-      });
-
-      protectedHL = null;
-      pendingHL = null;
-    }
-
-    if (protectedLH && i > protectedLH.index && close > protectedLH.level) {
-      events.push({
-        type: "BULLISH_EBO",
-        date: candle.datetime,
-        close,
-        broken_level: protectedLH.level
-      });
-
-      protectedLH = null;
-      pendingLH = null;
-    }
-
-    if (
-      direction === "BEARISH" &&
-      bearishLL &&
-      pendingLH &&
-      i > pendingLH.index &&
-      close < bearishLL.level
-    ) {
-      protectedLH = {
-        ...pendingLH,
-        confirmation_date: candle.datetime
-      };
-
-      pendingLH = null;
-
-      events.push({
-        type: "PROTECTED_LH_CONFIRMED",
-        date: protectedLH.date,
-        level: protectedLH.level
-      });
-    }
-
-    if (
-      direction === "BULLISH" &&
-      bullishHH &&
-      pendingHL &&
-      i > pendingHL.index &&
-      close > bullishHH.level
-    ) {
-      protectedHL = {
-        ...pendingHL,
-        confirmation_date: candle.datetime
-      };
-
-      pendingHL = null;
-
-      events.push({
-        type: "PROTECTED_HL_CONFIRMED",
-        date: protectedHL.date,
-        level: protectedHL.level
-      });
-    }
-
-    if (
-      latestSwingLow &&
-      i > latestSwingLow.index &&
-      close < latestSwingLow.level &&
-      (!bearishLL || bearishLL.broken_swing_low !== latestSwingLow.level)
-    ) {
-      bearishLL = {
-        date: candle.datetime,
-        index: i,
-        level: bodyBottom(candle),
-        broken_swing_low: latestSwingLow.level
-      };
-
-      direction = "BEARISH";
-
-      bullishHH = null;
-      pendingHL = null;
-      protectedHL = null;
-      pendingLH = null;
-      protectedLH = null;
-
-      events.push({
-        type: "LL_CONFIRMED",
-        date: candle.datetime,
-        level: bearishLL.level
-      });
-    }
-
-    if (
-      latestSwingHigh &&
-      i > latestSwingHigh.index &&
-      close > latestSwingHigh.level &&
-      (!bullishHH || bullishHH.broken_swing_high !== latestSwingHigh.level)
-    ) {
-      bullishHH = {
-        date: candle.datetime,
-        index: i,
-        level: bodyTop(candle),
-        broken_swing_high: latestSwingHigh.level
-      };
-
-      direction = "BULLISH";
-
-      bearishLL = null;
-      pendingLH = null;
-      protectedLH = null;
-      pendingHL = null;
-      protectedHL = null;
-
-      events.push({
-        type: "HH_CONFIRMED",
-        date: candle.datetime,
-        level: bullishHH.level
-      });
-    }
   }
 
   return {
@@ -1062,7 +1063,7 @@ function detectH4Structure(candles) {
     protectedLH,
     events
   };
-}
+    }
 
 // =====================================
 // HOME & TELEGRAM WEBHOOK (PART 1)
