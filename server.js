@@ -613,9 +613,8 @@ function detectDailyStructure(candles) {
   const swings = identifySwings(candles);
   const keyLevels = detectDailyKeyLevels(candles);
   const trackedKeyLevels = trackDailyKeyLevels(candles, keyLevels);
-
-const keyLevelReactions =
-  detectDailyKeyLevelReactions(candles, keyLevels);
+  const keyLevelReactions =
+    detectDailyKeyLevelReactions(candles, keyLevels);
 
   let latestSwingHigh = null;
   let latestSwingLow = null;
@@ -631,11 +630,90 @@ const keyLevelReactions =
 
   let direction = "UNCONFIRMED";
 
+  let bearishKeyLevelReached = false;
+  let bullishKeyLevelReached = false;
+
+  let bearishKeyLevelContact = null;
+  let bullishKeyLevelContact = null;
+
   const events = [];
 
   for (let i = 0; i < candles.length; i++) {
     const candle = candles[i];
+
     const close = Number(candle.close);
+    const high = Number(candle.high);
+    const low = Number(candle.low);
+
+    // =====================================
+    // BULLISH DAILY KEY-LEVEL CONTACT
+    // =====================================
+
+    if (direction === "BULLISH" && !bullishKeyLevelReached) {
+      const touchedLevel = keyLevels.find(level =>
+        level.bias === "BULLISH" &&
+        level.formation_index < i &&
+        high >= level.low &&
+        low <= level.high
+      );
+
+      if (touchedLevel) {
+        bullishKeyLevelReached = true;
+
+        bullishKeyLevelContact = {
+          date: candle.datetime,
+          level_type: touchedLevel.type,
+          level_formed: touchedLevel.second_candle,
+          level_low: touchedLevel.low,
+          level_high: touchedLevel.high,
+          protected_hl: protectedHL
+            ? { ...protectedHL }
+            : null
+        };
+
+        events.push({
+          type: "BULLISH_DAILY_KEY_LEVEL_CONTACT",
+          ...bullishKeyLevelContact
+        });
+      }
+    }
+
+    // =====================================
+    // BEARISH DAILY KEY-LEVEL CONTACT
+    // =====================================
+
+    if (direction === "BEARISH" && !bearishKeyLevelReached) {
+      const touchedLevel = keyLevels.find(level =>
+        level.bias === "BEARISH" &&
+        level.formation_index < i &&
+        high >= level.low &&
+        low <= level.high
+      );
+
+      if (touchedLevel) {
+        bearishKeyLevelReached = true;
+
+        bearishKeyLevelContact = {
+          date: candle.datetime,
+          level_type: touchedLevel.type,
+          level_formed: touchedLevel.second_candle,
+          level_low: touchedLevel.low,
+          level_high: touchedLevel.high,
+          protected_lh: protectedLH
+            ? { ...protectedLH }
+            : null
+        };
+
+        events.push({
+          type: "BEARISH_DAILY_KEY_LEVEL_CONTACT",
+          ...bearishKeyLevelContact
+        });
+      }
+    }
+
+    // =====================================
+    // IDENTIFY NEW SWINGS
+    // =====================================
 
     const formedSwings = swings.filter(
       swing => swing.index === i
@@ -702,11 +780,13 @@ const keyLevelReactions =
     }
 
     // =====================================
-    // BEARISH STRUCTURE
+    // CONFIRM PROTECTED LH
+    // Only before bearish key-level contact
     // =====================================
 
     if (
       direction === "BEARISH" &&
+      !bearishKeyLevelReached &&
       bearishLL &&
       pendingLH &&
       i > pendingLH.index &&
@@ -730,11 +810,13 @@ const keyLevelReactions =
     }
 
     // =====================================
-    // BULLISH STRUCTURE
+    // CONFIRM PROTECTED HL
+    // Only before bullish key-level contact
     // =====================================
 
     if (
       direction === "BULLISH" &&
+      !bullishKeyLevelReached &&
       bullishHH &&
       pendingHL &&
       i > pendingHL.index &&
@@ -777,14 +859,18 @@ const keyLevelReactions =
 
       direction = "BEARISH";
 
-      // Invalidate the previous bullish structure.
       bullishHH = null;
       pendingHL = null;
       protectedHL = null;
 
-      // A new LL requires a fresh LH formation.
+      bullishKeyLevelReached = false;
+      bullishKeyLevelContact = null;
+
       pendingLH = null;
       protectedLH = null;
+
+      bearishKeyLevelReached = false;
+      bearishKeyLevelContact = null;
 
       events.push({
         type: "LL_CONFIRMED",
@@ -814,14 +900,18 @@ const keyLevelReactions =
 
       direction = "BULLISH";
 
-      // Invalidate the previous bearish structure.
       bearishLL = null;
       pendingLH = null;
       protectedLH = null;
 
-      // A new HH requires a fresh HL formation.
+      bearishKeyLevelReached = false;
+      bearishKeyLevelContact = null;
+
       pendingHL = null;
       protectedHL = null;
+
+      bullishKeyLevelReached = false;
+      bullishKeyLevelContact = null;
 
       events.push({
         type: "HH_CONFIRMED",
@@ -842,11 +932,15 @@ const keyLevelReactions =
     pendingHL,
     protectedLH,
     protectedHL,
+    bearishKeyLevelReached,
+    bullishKeyLevelReached,
+    bearishKeyLevelContact,
+    bullishKeyLevelContact,
     swings,
     events,
     keyLevels,
-keyLevelReactions,
-trackedKeyLevels,
+    keyLevelReactions,
+    trackedKeyLevels
   };
         }
 
@@ -1054,7 +1148,7 @@ const keyLevelSummaryText =
   })
   .join("\n\n");
         const reactionText = result.keyLevelReactions.length
-  ? result.keyLevelReactions.slice(-5).map(reaction =>
+  ? result.keyLevelReactions.slice(0,5).map(reaction =>
       `• ${reaction.type} — ${reaction.date}\n` +
       `  Level: ${reaction.level_type} | Formed: ${reaction.level_formed}\n` +
 `  Close: ${reaction.close}`
