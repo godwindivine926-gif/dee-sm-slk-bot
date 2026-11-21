@@ -332,6 +332,7 @@ function detectDailyStructure(candles) {
         level: bodyBottom(candle),
         broken_swing_low: latestSwingLow.level
       };
+      pendingHL = null;
 
       events.push({
         type: "LL_CONFIRMED",
@@ -375,6 +376,7 @@ function detectDailyStructure(candles) {
         level: bodyTop(candle),
         broken_swing_high: latestSwingHigh.level
       };
+      pendingLH = null;
 
       events.push({
         type: "HH_CONFIRMED",
