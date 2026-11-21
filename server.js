@@ -209,7 +209,8 @@ function toTimestampMs(datetimeStr, endOfDay = false) {
     return Date.parse(endOfDay ? `${raw}T23:59:59Z` : `${raw}T00:00:00Z`);
   }
   return Date.parse(raw.includes("T") ? raw : `${raw.replace(" ", "T")}Z`);
-      }
+}
+
 // =====================================
 // MARKET DATA VALIDATION
 // =====================================
@@ -298,10 +299,8 @@ function filterCompletedH4Candles(rawCandles) {
       const datePart = dtStr.slice(0, 10);
       const day = new Date(`${datePart}T00:00:00Z`).getUTCDay();
 
-      // Exclude weekends (Saturday = 6, Sunday = 0)
       if (day === 0 || day === 6) return false;
 
-      // Exclude current/future developing bars in WAT
       const comparable = dtStr.replace("T", " ").slice(0, 16);
       if (comparable >= nowIsoPrefix) return false;
 
@@ -443,7 +442,6 @@ function detectWeeklyKeyLevels(w1Candles) {
     const firstColor = candleColor(first);
     const secondColor = candleColor(second);
 
-    // Weekly A-SHAPE (Bearish reversal level)
     if (firstColor === "BULLISH" && secondColor === "BEARISH") {
       levels.push({
         type: "A-SHAPE",
@@ -456,7 +454,6 @@ function detectWeeklyKeyLevels(w1Candles) {
       });
     }
 
-    // Weekly V-SHAPE (Bullish reversal level)
     if (firstColor === "BEARISH" && secondColor === "BULLISH") {
       levels.push({
         type: "V-SHAPE",
@@ -469,7 +466,6 @@ function detectWeeklyKeyLevels(w1Candles) {
       });
     }
 
-    // Weekly OPEN/CLOSE gap
     if (firstColor === secondColor && firstColor !== "DOJI") {
       const firstClose = Number(first.close);
       const secondOpen = Number(second.open);
@@ -501,7 +497,6 @@ function detectWeeklyKeyLevelContacts(w1Candles, w1Levels) {
       const low = Number(candle.low);
       const close = Number(candle.close);
 
-      // Invalidated before reacting
       if (
         (level.bias === "BEARISH" && close > level.high) ||
         (level.bias === "BULLISH" && close < level.low)
@@ -509,7 +504,6 @@ function detectWeeklyKeyLevelContacts(w1Candles, w1Levels) {
         break;
       }
 
-      // Weekly candle tapped into the weekly key level
       if (high >= level.low && low <= level.high) {
         contacts.push({
           type:
@@ -529,7 +523,7 @@ function detectWeeklyKeyLevelContacts(w1Candles, w1Levels) {
   }
 
   return contacts.sort((a, b) => a.contact_date.localeCompare(b.contact_date));
-      }
+}
 
 // =====================================
 // TWO-CANDLE SWING DETECTOR
@@ -834,7 +828,6 @@ function detectDailyStructure(candles) {
     for (const swing of formedSwings) {
       if (swing.type === "SWING_HIGH") {
         latestSwingHigh = swing;
-        // Do not allow a swing formed after a bearish key-level contact to replace the locked LH
         const afterBearishContact =
           bearishContactIndex !== null && swing.index > bearishContactIndex;
 
@@ -974,7 +967,6 @@ function detectDailyStructure(candles) {
       bullishKeyLevelReached = false;
       bullishKeyLevelContact = null;
 
-      // Preserve locked pre-contact LH if a bearish key-level contact occurred earlier
       if (lockedPreContactLH) {
         protectedLH = { ...lockedPreContactLH };
         if (bearishKeyLevelContact) {
@@ -1049,7 +1041,7 @@ function detectDailyStructure(candles) {
     keyLevelReactions,
     trackedKeyLevels
   };
-      }
+}
 
 // =====================================
 // STANDALONE H4 STRUCTURE & EBO DETECTOR
@@ -1078,7 +1070,6 @@ function detectH4Structure(h4Candles) {
     const candle = h4Candles[i];
     const close = Number(candle.close);
 
-    // 1. H4 EBO check using completed H4 candle-body close only (no wicks)
     if (
       protectedLH &&
       i > protectedLH.index &&
@@ -1115,7 +1106,6 @@ function detectH4Structure(h4Candles) {
       pendingHL = null;
     }
 
-    // 2. Confirm H4 LL (body close below previous H4 swing low)
     if (
       latestSwingLow &&
       i > latestSwingLow.index &&
@@ -1158,7 +1148,6 @@ function detectH4Structure(h4Candles) {
       });
     }
 
-    // 3. Confirm H4 HH (body close above previous H4 swing high)
     if (
       latestSwingHigh &&
       i > latestSwingHigh.index &&
@@ -1201,7 +1190,6 @@ function detectH4Structure(h4Candles) {
       });
     }
 
-    // 4. Register new H4 swings without overwriting protected H4 swings
     const formedSwings = swings.filter(swing => swing.index === i);
 
     for (const swing of formedSwings) {
@@ -1250,8 +1238,6 @@ function detectLowerTimeframePullbackBreak({
   const lowerSwings = identifySwings(lowerCandles);
   const contactCutoffMs = toTimestampMs(contactEvent.contact_date, true);
 
-  // Price pushed UP into a BEARISH higher-timeframe key level -> look for last pullback LOW before tap
-  // Price pushed DOWN into a BULLISH higher-timeframe key level -> look for last pullback HIGH before tap
   const requiredPullbackType =
     contactEvent.bias === "BEARISH" ? "SWING_LOW" : "SWING_HIGH";
 
@@ -1281,7 +1267,6 @@ function detectLowerTimeframePullbackBreak({
 
   const lastPullback = candidatePullbacks[candidatePullbacks.length - 1];
 
-  // Look for candle-body close invalidating that pullback at or after the HTF tap
   let confirmedEbo = null;
 
   for (let i = lastPullback.index + 1; i < lowerCandles.length; i++) {
@@ -1416,7 +1401,7 @@ function detectDailyToH4Ebo(d1Candles, h4Candles) {
     latest_setup: setups[setups.length - 1],
     all_setups: setups
   };
-      }
+}
 
 // =====================================
 // HOME & TELEGRAM WEBHOOK (PART 1)
@@ -1484,7 +1469,7 @@ app.post("/webhook", async (req, res) => {
 
     const message = req.body?.message;
     if (!message || !message.text) return;
-    
+
     chatId = parseChatId(message.chat.id);
     const parts = message.text.trim().split(/\s+/);
 
@@ -1598,9 +1583,10 @@ app.post("/webhook", async (req, res) => {
         active ? "Monitoring resumed." : "Monitoring paused."
       );
       return;
-}
-                if (command === "/check") {
-      if (!argument) {
+    }
+
+    if (command === "/check") {
+            if (!argument) {
         await sendMessage(chatId, "Example: /check GBPUSD");
         return;
       }
@@ -1638,9 +1624,6 @@ app.post("/webhook", async (req, res) => {
         const w1ToD1 = w1Candles.length >= 3 ? detectWeeklyToDailyEbo(w1Candles, d1Candles) : null;
         const d1ToH4 = h4Candles.length >= 5 ? detectDailyToH4Ebo(d1Candles, h4Candles) : null;
 
-        const describeSwing = swing =>
-          swing ? `${swing.date} | Level: ${formatPrice(swing.level)}` : "Not formed";
-
         const describeProtectedSwing = swing => {
           if (!swing) return "Not formed";
           const conf = swing.confirmation_date ? ` (conf. ${swing.confirmation_date})` : "";
@@ -1668,7 +1651,6 @@ app.post("/webhook", async (req, res) => {
             ? `✅ ${setup.ebo.type} — ${setup.ebo.date} (Close: ${formatPrice(setup.ebo.close)})`
             : `⏳ Status: ${setup.status}`;
 
-          // Also surface the most recent confirmed EBO if the latest tap hasn't broken yet
           let latestConfirmedExtra = "";
           if (!setup.ebo) {
             const confirmedSetups = allSetups.filter(s => s.ebo);
@@ -1750,10 +1732,12 @@ app.post("/webhook", async (req, res) => {
           `<b>RECENT D1 EVENTS</b>\n${eventText}\n\n` +
           `<i>Structure and EBOs require completed candle-body closes.</i>`;
 
-                await sendMessage(chatId, report, buildStorylineInlineKeyboard(symbol));
+        await sendMessage(chatId, report, buildStorylineInlineKeyboard(symbol));
       } finally {
         activeChecks.delete(lockKey);
       }
+      return;
+    }
 
     if (command === "/weekly") {
       const now = new Date();
@@ -1791,6 +1775,7 @@ app.post("/webhook", async (req, res) => {
         .join("\n");
 
       await sendMessage(chatId, `<b>LAST WEEK'S EVENTS</b>\n\n${report}`);
+      return;
     }
   } catch (error) {
     console.error("Webhook error:", error.response?.data || error.message);
@@ -1936,7 +1921,7 @@ app.get("/test-d1-h4-ebo", async (req, res) => {
 
     const cascade = detectDailyToH4Ebo(d1Candles, h4Candles);
 
-        res.json({
+    res.json({
       success: true,
       symbol,
       cascade: "D1 -> H4",
@@ -1948,8 +1933,7 @@ app.get("/test-d1-h4-ebo", async (req, res) => {
       message: error.message
     });
   }
-}});
-
+});
 
 app.get("/test-h4-ebo", async (req, res) => {
   try {
@@ -1958,20 +1942,20 @@ app.get("/test-h4-ebo", async (req, res) => {
     const candles = filterCompletedH4Candles(raw);
     const result = detectH4Structure(candles);
 
-            res.json({
+    res.json({
       success: true,
       symbol,
-      cascade: "D1 -> H4",
-      ...cascade
+      timeframe: "H4",
+      latestCandle: candles[candles.length - 1] || null,
+      ...result
     });
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: error.message
+      error: error.message
     });
   }
-}});
-
+});
 
 // =====================================
 // AUTOMATIC WATCHLIST MONITOR (EVERY 30 MIN)
@@ -2156,8 +2140,8 @@ function startWatchlistMonitor() {
   setInterval(() => {
     scanWatchlistOnce();
   }, MONITOR_INTERVAL_MS);
-                         }
-        
+}
+
 // =====================================
 // SERVER START
 // =====================================
