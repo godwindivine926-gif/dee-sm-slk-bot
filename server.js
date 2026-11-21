@@ -940,7 +940,8 @@ app.post("/webhook", async (req, res) => {
         const reactionText = result.keyLevelReactions.length
   ? result.keyLevelReactions.slice(-10).map(reaction =>
       `• ${reaction.type} — ${reaction.date}\n` +
-      `  ${reaction.level_type} | Close: ${reaction.close}`
+      `  Level: ${reaction.level_type} | Formed: ${reaction.level_formed}\n` +
+`  Close: ${reaction.close}`
     ).join("\n")
   : "No confirmed key-level reactions.";
       const latestCandle = candles[candles.length - 1];
@@ -1002,7 +1003,7 @@ app.post("/webhook", async (req, res) => {
         `Protected HL: ${describeSwing(result.protectedHL)}\n\n` +
         `<b>DAILY KEY-LEVEL REACTIONS</b>\n${reactionText}\n\n` +
         `<b>RECENT EVENTS</b>\n${eventText}\n\n` +
-        `<i>Completed D1 candles only. Candle bodies are used; wicks are ignored.</i>`;
+        `<i>Structure uses candle bodies. Key-level contact recognises wick or body interaction; confirmation requires a close beyond the zone.</i>`;
 
       await sendMessage(chatId, report);
       return;
