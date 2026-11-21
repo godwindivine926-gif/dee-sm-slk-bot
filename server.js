@@ -1005,13 +1005,23 @@ app.post("/webhook", async (req, res) => {
       }
 
       const result = detectDailyStructure(candles);
-        const statusText = result.trackedKeyLevels.length
-  ? result.trackedKeyLevels.slice(-10).map(level =>
-      `• ${level.type} — ${level.status}\n` +
-      `  Bias: ${level.bias} | Formed: ${level.second_candle}\n` +
-      `  Zone: ${level.low} – ${level.high}`
-    ).join("\n")
-  : "No key levels found.";
+        const statusText = ["ACTIVE", "REACTED", "INVALIDATED"]
+  .map(status => {
+    const levels = result.trackedKeyLevels
+      .filter(level => level.status === status)
+      .slice(-10);
+
+    const details = levels.length
+      ? levels.map(level =>
+          `• ${level.type}\n` +
+          `  Bias: ${level.bias} | Formed: ${level.second_candle}\n` +
+          `  Zone: ${level.low} – ${level.high}`
+        ).join("\n")
+      : "None";
+
+    return `<b>${status} LEVELS</b>\n${details}`;
+  })
+  .join("\n\n");
         const reactionText = result.keyLevelReactions.length
   ? result.keyLevelReactions.slice(-10).map(reaction =>
       `• ${reaction.type} — ${reaction.date}\n` +
