@@ -1970,7 +1970,7 @@ app.get("/test-h4-ebo", async (req, res) => {
       error: error.message
     });
   }
-});
+};
 
 
 // =====================================
