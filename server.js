@@ -607,7 +607,6 @@ app.post("/webhook", async (req, res) => {
       await sendMessage(chatId, `<b>LAST WEEK'S EVENTS</b>\n\n${report}`);
       return;
     }
-
   } catch (error) {
     console.error(
       "Webhook error:",
@@ -645,7 +644,6 @@ app.get("/test-market-data", async (req, res) => {
       symbol,
       data
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -705,7 +703,6 @@ app.get("/test-w1-av", async (req, res) => {
       timeframe: "W1",
       formations
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -767,7 +764,6 @@ app.get("/test-w1-open-close", async (req, res) => {
       timeframe: "W1",
       formations
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -797,7 +793,6 @@ app.get("/test-d1-candles", async (req, res) => {
       excluded_unfinished_dates: filtered.excludedUnfinished,
       candles: filtered.candles.slice(-10)
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -845,6 +840,13 @@ app.get("/test-d1-ebo", async (req, res) => {
         protected_LH: result.protectedLH
       },
 
+      
+      bearish_structure: {
+        LL: result.bearishLL,
+        pending_LH: result.pendingLH,
+        protected_LH: result.protectedLH
+      },
+
       bullish_structure: {
         HH: result.bullishHH,
         pending_HL: result.pendingHL,
@@ -859,7 +861,6 @@ app.get("/test-d1-ebo", async (req, res) => {
       note:
         "Swing levels use consecutive two-candle formations and candle bodies. EBO requires a completed candle body close beyond the protected swing."
     });
-
   } catch (error) {
     console.error("D1 detector error:", error.response?.data || error.message);
 
@@ -887,7 +888,6 @@ app.get("/test-h4-candles", async (req, res) => {
       timeframe: "H4",
       candles: candles.slice(-10)
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
