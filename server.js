@@ -2061,7 +2061,8 @@ function startWatchlistMonitor() {
   setInterval(() => {
     scanWatchlistOnce();
   }, MONITOR_INTERVAL_MS);
-  
+}
+
 // =====================================
 // SERVER START
 // =====================================
@@ -2070,4 +2071,3 @@ app.listen(PORT, () => {
   console.log(`DEE SM SLK BOT running on port ${PORT}`);
   startWatchlistMonitor();
 });
-                                       
