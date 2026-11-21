@@ -1777,17 +1777,22 @@ app.post("/webhook", async (req, res) => {
           ? "🟢 <b>BUY"
           : `${badge} <b>${symbol}`;
 
-      const msg =
-        `${dirLabel} · ${symbol} · D1 → H4</b>\n` +
-        `${d1h4Setup?.ebo ? "External breakout confirmed" : "Monitoring D1 structure & 4H alignment"}\n\n` +
-        `<i>${w1Summary}</i>\n` +
-        `<b>D1 reaction / KL:</b> ${d1LevelType}${d1LevelPrice != null ? ` @ ${formatPrice(d1LevelPrice)}` : ""} (${d1ContactDate})\n` +
-        (d1h4Setup?.ebo?.pullback_date ? `<b>Pullback level date:</b> ${d1h4Setup.ebo.pullback_date}\n` : ``) +
-        `${h4StatusLine}\n\n` +
-        `All times shown are candle open times.\n\n` +
-        `⚠️ Not an entry signal. Bias only — wait for your entry model.\n\n` +
-        `Sent ${formatWatTimestamp()}`;
-        await sendMessage(chatId, msg, buildStorylineInlineKeyboard(symbol));
+      const w1ToD1Ebo = w1ToD1?.latest_setup?.ebo;
+const w1ToD1Line = w1ToD1Ebo
+  ? `<b>W1 → D1 break:</b> ${w1ToD1Ebo.type} (${w1ToD1Ebo.date}) @ ${formatPrice(w1ToD1Ebo.close)}\n`
+  : "";
+
+const msg =
+  `${dirLabel} · ${symbol} · D1 & H4</b>\n` +
+  `${d1h4Setup?.ebo ? "External breakout confirmed" : "Monitoring D1 structure..."}\n` +
+  `<i>${w1Summary}</i>\n` +
+  `${w1ToD1Line}` +
+  `<b>D1 reaction / KL:</b> ${d1LevelType}${d1LevelPrice != null ? ` @ ${formatPrice(d1LevelPrice)}` : ""}${d1h4Setup?.ebo?.pullback_date ? ` · <b>Pullback level date:</b> ${d1h4Setup.ebo.pullback_date}` : ""}\n` +
+  `${h4StatusLine}\n\n` +
+  'All times shown are candle open times.\n\n' +
+  '⚠️ Not an entry signal. Bias only - wait for your entry model.\n\n' +
+  `Sent ${formatWatTimestamp()}`;
+   await sendMessage(chatId, msg, buildStorylineInlineKeyboard(symbol));
       return;
         }
     
