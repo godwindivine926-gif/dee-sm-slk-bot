@@ -1314,7 +1314,19 @@ function detectLowerTimeframePullbackBreak({
   contactEvent,
   lowerCandles
 }) {
-    const lowerSwings = identifySwings(lowerCandles);
+    
+
+    if (contactEvent.bias === "BULLISH" && close > lastPullback.level) {
+      confirmedEbo = {
+        type: `BULLISH_${lowerTimeframe}_EBO`,
+        date: candle.datetime,
+        close,
+        broken_pullback_level: lastPullback.level,
+        pullback_date: lastPullback.date
+      };
+    }
+  }
+  const lowerSwings = identifySwings(lowerCandles);
   const contactCutoffMs = toTimestampMs(contactEvent.contact_date, true);
 
   const requiredPullbackType =
@@ -1353,35 +1365,44 @@ function detectLowerTimeframePullbackBreak({
     };
   }
 
-  const lastPullback = candidatePullbacks[candidatePullbacks.length - 1];
-
   let confirmedEbo = null;
+  let activePullback = candidatePullbacks[candidatePullbacks.length - 1];
 
-  for (let i = lastPullback.index + 1; i < lowerCandles.length; i++) {
-    const candle = lowerCandles[i];
-    const close = Number(candle.close);
+  for (let p = candidatePullbacks.length - 1; p >= 0; p--) {
+    const pullback = candidatePullbacks[p];
+    let matchedEbo = null;
 
-    if (contactEvent.bias === "BEARISH" && close < lastPullback.level) {
-      confirmedEbo = {
-        type: `BEARISH_${lowerTimeframe}_EBO`,
-        date: candle.datetime,
-        close,
-        broken_pullback_level: lastPullback.level,
-        pullback_date: lastPullback.date
-      };
+    for (let i = pullback.index + 1; i < lowerCandles.length; i++) {
+      const candle = lowerCandles[i];
+      const close = Number(candle.close);
+
+      if (contactEvent.bias === "BEARISH" && close < pullback.level) {
+        matchedEbo = {
+          type: `BEARISH_${lowerTimeframe}_EBO`,
+          date: candle.datetime,
+          close,
+          broken_pullback_level: pullback.level,
+          pullback_date: pullback.date
+        };
+      }
+
+      if (contactEvent.bias === "BULLISH" && close > pullback.level) {
+        matchedEbo = {
+          type: `BULLISH_${lowerTimeframe}_EBO`,
+          date: candle.datetime,
+          close,
+          broken_pullback_level: pullback.level,
+          pullback_date: pullback.date
+        };
+      }
     }
 
-    if (contactEvent.bias === "BULLISH" && close > lastPullback.level) {
-      confirmedEbo = {
-        type: `BULLISH_${lowerTimeframe}_EBO`,
-        date: candle.datetime,
-        close,
-        broken_pullback_level: lastPullback.level,
-        pullback_date: lastPullback.date
-      };
+    if (matchedEbo) {
+      confirmedEbo = matchedEbo;
+      activePullback = pullback;
+      break;
     }
   }
-
   return {
     higher_timeframe: higherTimeframe,
     lower_timeframe: lowerTimeframe,
@@ -1395,10 +1416,11 @@ function detectLowerTimeframePullbackBreak({
     },
     status: confirmedEbo ? "EBO_CONFIRMED" : "WAITING_FOR_PULLBACK_BREAK",
     pullback: {
-      type: lastPullback.type,
-      date: lastPullback.date,
-      level: lastPullback.level
-    },
+            pullback: {
+        type: activePullback.type,
+        date: activePullback.date,
+        level: activePullback.level
+      },
     ebo: confirmedEbo
   };
 }
