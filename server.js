@@ -1638,33 +1638,47 @@ app.post("/webhook", async (req, res) => {
           ? "🔴"
           : "⚪";
 
-            const w1d1Block = w1d1Setup
-        ? `<b>W1 > D1:</b> ${w1d1Setup.htf_level_type} @ <b>${formatPrice(w1d1Setup.htf_zone.low)}</b> → ` +
-          `${w1d1Setup.ebo ? `✅ EBO @ <b>${formatPrice(w1d1Setup.ebo.broken_pullback_level)}</b>` : `⏳ Waiting pullback break`}\n` +
-          `<i>Cause ${w1d1Setup.htf_level_formed} · tapped ${w1d1Setup.htf_contact_date}</i>`
+                  const w1d1Block = w1d1Setup
+        ? `<b>W1 ${w1d1Setup.htf_level_type} rejection @ ${formatPrice(w1d1Setup.htf_zone.low)}</b>\n` +
+          (w1d1Setup.ebo
+            ? `<b>D1 EBO broke ${w1d1Setup.htf_level_type} @ ${formatPrice(w1d1Setup.ebo.broken_pullback_level)}</b>\n\n`
+            : `<i>⏳ Waiting pullback break</i>\n\n`) +
+          `<i>Cause level formed ${w1d1Setup.htf_level_formed} · tapped ${w1d1Setup.htf_contact_date}</i>` +
+          (w1d1Setup.ebo?.broken_pullback_date ? `\n<i>Breakout level formed ${w1d1Setup.ebo.broken_pullback_date}</i>` : ``)
         : `<b>W1 > D1:</b> No active setup`;
 
       const d1h4Block = d1h4Setup
-        ? `<b>D1 > H4:</b> ${d1h4Setup.htf_level_type} @ <b>${formatPrice(d1h4Setup.htf_zone.low)}</b> → ` +
-          `${d1h4Setup.ebo ? `✅ EBO @ <b>${formatPrice(d1h4Setup.ebo.broken_pullback_level)}</b>` : `⏳ Waiting pullback break`}\n` +
-          `<i>Cause ${d1h4Setup.htf_level_formed} · tapped ${d1h4Setup.htf_contact_date}</i>`
+        ? `<b>D1 ${d1h4Setup.htf_level_type} rejection @ ${formatPrice(d1h4Setup.htf_zone.low)}</b>\n` +
+          (d1h4Setup.ebo
+            ? `<b>H4 EBO broke ${d1h4Setup.htf_level_type} @ ${formatPrice(d1h4Setup.ebo.broken_pullback_level)}</b>\n\n`
+            : `<i>⏳ Waiting pullback break</i>\n\n`) +
+          `<i>Cause level formed ${d1h4Setup.htf_level_formed} · tapped ${d1h4Setup.htf_contact_date}</i>` +
+          (d1h4Setup.ebo?.broken_pullback_date ? `\n<i>Breakout level formed ${d1h4Setup.ebo.broken_pullback_date}</i>` : ``)
         : `<b>D1 > H4:</b> No active setup`;
-                  
 
       const alignmentText =
         w1Bias !== "NEUTRAL" && d1Bias !== "NEUTRAL"
-          ? `W1 ${w1Bias} · D1 ${d1Bias} — ${w1Bias === d1Bias ? "W/D ALIGNED · CONTINUATION" : "W/D CONFLICTING · REVERSAL"}`
-          : `W1 ${w1Bias} · D1 ${d1Bias}`;
+          ? `<b>W1 ${w1Bias} · D1 ${d1Bias} — ${w1Bias === d1Bias ? "W/D ALIGNED · CONTINUATION" : "W/D CONFLICTING · REVERSAL"}</b>`
+          : `<b>W1 ${w1Bias} · D1 ${d1Bias}</b>`;
+
+      const storylineTitle =
+        badge === "🟢"
+          ? "🟢 <b>BULLISH STORYLINE CONFIRMED —</b>"
+          : badge === "🔴"
+          ? "🔴 <b>BEARISH STORYLINE CONFIRMED —</b>"
+          : `${badge} <b>${symbol} — MARKET READ</b>`;
+
+      const activeLegTitle = d1h4Setup?.ebo ? `${symbol} · D1 > H4` : `${symbol} · W1 > D1`;
 
       const msg =
-        `<b>${badge} ${symbol} — MARKET READ</b>\n\n` +
-        `${w1d1Block}\n\n` +
-        `${d1h4Block}\n\n` +
+        `${storylineTitle}\n` +
+        `<b>${activeLegTitle}</b>\n\n` +
+        `${d1h4Setup?.ebo ? d1h4Block : w1d1Block}\n\n` +
         `${alignmentText}\n` +
-        `NEXT DAY RULE: ${nextDayRule}\n` +
+        `<i>NEXT DAY RULE: ${nextDayRule}</i>\n` +
         `Sent ${formatWatTimestamp()}\n\n` +
         `Not an entry signal — bias context only.`;
-
+                  
       await sendMessage(chatId, msg, buildStorylineInlineKeyboard(symbol));
       return;
         }
