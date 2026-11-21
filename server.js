@@ -1631,7 +1631,7 @@ app.post("/webhook", async (req, res) => {
           ? "🔴"
           : "⚪";
 
-      const w1d1Block = w1d1Setup
+            const w1d1Block = w1d1Setup
         ? `<b>W1 > D1:</b> ${w1d1Setup.htf_level_type} @ <b>${formatPrice(w1d1Setup.htf_zone.low)}</b> → ` +
           `${w1d1Setup.ebo ? `✅ EBO @ <b>${formatPrice(w1d1Setup.ebo.broken_pullback_level)}</b>` : `⏳ Waiting pullback break`}\n` +
           `<i>Cause ${w1d1Setup.htf_level_formed} · tapped ${w1d1Setup.htf_contact_date}</i>`
@@ -1642,6 +1642,7 @@ app.post("/webhook", async (req, res) => {
           `${d1h4Setup.ebo ? `✅ EBO @ <b>${formatPrice(d1h4Setup.ebo.broken_pullback_level)}</b>` : `⏳ Waiting pullback break`}\n` +
           `<i>Cause ${d1h4Setup.htf_level_formed} · tapped ${d1h4Setup.htf_contact_date}</i>`
         : `<b>D1 > H4:</b> No active setup`;
+                  
 
       const alignmentText =
         w1Bias !== "NEUTRAL" && d1Bias !== "NEUTRAL"
