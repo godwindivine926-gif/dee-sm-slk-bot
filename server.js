@@ -475,6 +475,7 @@ function detectDailyKeyLevels(candles) {
 
 function detectDailyKeyLevelReactions(candles, levels) {
   const reactions = [];
+  const seen = new Set();
 
   for (const level of levels) {
     for (
@@ -488,48 +489,54 @@ function detectDailyKeyLevelReactions(candles, levels) {
       const low = Number(candle.low);
       const close = Number(candle.close);
 
-      // Price must reach the key-level zone.
-      const touched = high >= level.low && low <= level.high;
+      const touched =
+        high >= level.low && low <= level.high;
 
       if (!touched) continue;
 
-      // Bearish reaction: price reacts downward
-      // and closes below the entire zone.
+      let reaction = null;
+
       if (
         level.bias === "BEARISH" &&
         close < level.low
       ) {
-        reactions.push({
-          type: "BEARISH_KEY_LEVEL_REACTION",
-          level_type: level.type,
-          date: candle.datetime,
-          level_low: level.low,
-          level_high: level.high,
-          close,
-          confirmation: "BEARISH CLOSE BELOW KEY LEVEL"
-        });
+        reaction = "BEARISH_KEY_LEVEL_REACTION";
       }
 
-      // Bullish reaction: price reacts upward
-      // and closes above the entire zone.
       if (
         level.bias === "BULLISH" &&
         close > level.high
       ) {
+        reaction = "BULLISH_KEY_LEVEL_REACTION";
+      }
+
+      if (!reaction) continue;
+
+      const uniqueKey =
+        `${level.type}-${level.first_candle}-${level.second_candle}-${candle.datetime}`;
+
+      if (!seen.has(uniqueKey)) {
+        seen.add(uniqueKey);
+
         reactions.push({
-          type: "BULLISH_KEY_LEVEL_REACTION",
+          type: reaction,
           level_type: level.type,
+          level_formed: level.second_candle,
           date: candle.datetime,
           level_low: level.low,
           level_high: level.high,
-          close,
-          confirmation: "BULLISH CLOSE ABOVE KEY LEVEL"
+          close
         });
       }
+
+      // First confirmed reaction for this level.
+      break;
     }
   }
 
-  return reactions;
+  return reactions.sort((a, b) =>
+    b.date.localeCompare(a.date)
+  );
 }
 
 // =====================================
