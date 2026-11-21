@@ -540,12 +540,84 @@ function detectDailyKeyLevelReactions(candles, levels) {
 }
 
 // =====================================
+// DAILY KEY-LEVEL STATUS TRACKER
+// =====================================
+
+function trackDailyKeyLevels(candles, levels) {
+  return levels.map(level => {
+    let status = "ACTIVE";
+    let reaction = null;
+    let invalidation = null;
+
+    for (
+      let i = level.formation_index + 1;
+      i < candles.length;
+      i++
+    ) {
+      const candle = candles[i];
+      const close = Number(candle.close);
+      const high = Number(candle.high);
+      const low = Number(candle.low);
+
+      // Check whether the level has been invalidated.
+      if (
+        (level.bias === "BEARISH" && close > level.high) ||
+        (level.bias === "BULLISH" && close < level.low)
+      ) {
+        status = "INVALIDATED";
+        invalidation = {
+          date: candle.datetime,
+          close
+        };
+        break;
+      }
+
+      // Check for a confirmed reaction.
+      const touched =
+        high >= level.low && low <= level.high;
+
+      if (!reaction && touched) {
+        if (
+          level.bias === "BEARISH" &&
+          close < level.low
+        ) {
+          reaction = {
+            date: candle.datetime,
+            close
+          };
+          status = "REACTED";
+        }
+
+        if (
+          level.bias === "BULLISH" &&
+          close > level.high
+        ) {
+          reaction = {
+            date: candle.datetime,
+            close
+          };
+          status = "REACTED";
+        }
+      }
+    }
+
+    return {
+      ...level,
+      status,
+      reaction,
+      invalidation
+    };
+  });
+}
+
+// =====================================
 // REBUILT D1 STRUCTURE DETECTOR
 // =====================================
 
 function detectDailyStructure(candles) {
   const swings = identifySwings(candles);
   const keyLevels = detectDailyKeyLevels(candles);
+  const trackedKeyLevels = trackDailyKeyLevels(candles, keyLevels);
 
 const keyLevelReactions =
   detectDailyKeyLevelReactions(candles, keyLevels);
@@ -779,6 +851,7 @@ const keyLevelReactions =
     events,
     keyLevels,
 keyLevelReactions,
+trackedKeyLevels,
   };
         }
 
@@ -937,6 +1010,13 @@ app.post("/webhook", async (req, res) => {
       }
 
       const result = detectDailyStructure(candles);
+        const statusText = result.trackedKeyLevels.length
+  ? result.trackedKeyLevels.slice(-10).map(level =>
+      `• ${level.type} — ${level.status}\n` +
+      `  Bias: ${level.bias} | Formed: ${level.second_candle}\n` +
+      `  Zone: ${level.low} – ${level.high}`
+    ).join("\n")
+  : "No key levels found.";
         const reactionText = result.keyLevelReactions.length
   ? result.keyLevelReactions.slice(-10).map(reaction =>
       `• ${reaction.type} — ${reaction.date}\n` +
@@ -1001,6 +1081,7 @@ app.post("/webhook", async (req, res) => {
         `${describeStructure(result.bullishHH, "HH")}\n` +
         `Pending HL: ${describeSwing(result.pendingHL)}\n` +
         `Protected HL: ${describeSwing(result.protectedHL)}\n\n` +
+        `<b>DAILY KEY-LEVEL STATUS</b>\n${statusText}\n\n` +
         `<b>DAILY KEY-LEVEL REACTIONS</b>\n${reactionText}\n\n` +
         `<b>RECENT EVENTS</b>\n${eventText}\n\n` +
         `<i>Structure uses candle bodies. Key-level contact recognises wick or body interaction; confirmation requires a close beyond the zone.</i>`;
