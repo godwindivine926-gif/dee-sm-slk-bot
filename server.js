@@ -2133,13 +2133,14 @@ async function scanWatchlistOnce() {
           setup.ebo,
           { suppressAlert: isInitialSeedRun }
         );
-        if (shouldAlert) {
+                if (shouldAlert) {
           await sendMessage(
             chatId,
             buildCascadeAlertMessage(symbol, "D1 > H4", setup),
             buildStorylineInlineKeyboard(symbol)
           );
         }
+      }
     }
 
     hasCompletedInitialSeed = true;
