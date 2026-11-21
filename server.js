@@ -6,20 +6,34 @@ const axios = require("axios");
 const app = express();
 app.use(express.json());
 
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const TWELVE_DATA_API_KEY = process.env.TWELVE_DATA_API_KEY;
 
+for (const [name, value] of [
+  ["BOT_TOKEN", BOT_TOKEN],
+  ["SUPABASE_URL", SUPABASE_URL],
+  ["SUPABASE_SERVICE_ROLE_KEY", SUPABASE_KEY],
+  ["TWELVE_DATA_API_KEY", TWELVE_DATA_API_KEY]
+]) {
+  if (!value) {
+    console.warn(`Warning: Missing environment variable ${name}.`);
+  }
+}
+
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
+const WAT_OFFSET_MS = 60 * 60 * 1000;
 
 const supabaseHeaders = {
   apikey: SUPABASE_KEY,
   Authorization: `Bearer ${SUPABASE_KEY}`,
   "Content-Type": "application/json"
 };
+
+const activeChecks = new Set();
 
 // =====================================
 // GENERAL HELPERS
@@ -29,7 +43,7 @@ function normalizeSymbol(input) {
   let symbol = String(input || "EUR/USD")
     .trim()
     .toUpperCase()
-    .replace(/\s/g, "");
+    .replace(/\s+/g, "");
 
   if (/^[A-Z]{6}$/.test(symbol)) {
     symbol = `${symbol.slice(0, 3)}/${symbol.slice(3)}`;
@@ -38,33 +52,59 @@ function normalizeSymbol(input) {
   return symbol;
 }
 
+function parseChatId(chatId) {
+  const numeric = Number(chatId);
+  if (!Number.isSafeInteger(numeric) || numeric === 0) {
+    throw new Error("Invalid Telegram chat ID.");
+  }
+  return numeric;
+}
+
+function getWatNow(referenceDate = new Date()) {
+  return new Date(referenceDate.getTime() + WAT_OFFSET_MS);
+}
+
 async function sendMessage(chatId, text) {
+  if (!BOT_TOKEN) {
+    console.error("Telegram error: BOT_TOKEN is missing.");
+    return;
+  }
+
   try {
-    await axios.post(`${TELEGRAM_API}/sendMessage`, {
-      chat_id: chatId,
-      text,
-      parse_mode: "HTML"
-    });
+    await axios.post(
+      `${TELEGRAM_API}/sendMessage`,
+      {
+        chat_id: chatId,
+        text,
+        parse_mode: "HTML"
+      },
+      { timeout: 10000 }
+    );
   } catch (error) {
-    console.error("Telegram error:", error.message);
+    console.error("Telegram error:", error.response?.data || error.message);
   }
 }
 
 async function databaseRequest(path, method = "GET", body = null) {
+  if (!SUPABASE_URL || !SUPABASE_KEY) {
+    throw new Error("Supabase configuration is missing.");
+  }
+
   const response = await axios({
     method,
-    url: `${SUPABASE_URL}/rest/v1/${path}`,
+    url: `${SUPABASE_URL.replace(/\/+$/, "")}/rest/v1/${path}`,
     headers: {
       ...supabaseHeaders,
       Prefer: "return=representation"
     },
-    data: body
+    data: body,
+    timeout: 10000
   });
 
   return response.data;
 }
 
-async function getMarketCandles(symbol, interval, outputsize = 100) {
+async function getMarketCandles(symbol, interval, outputsize = 150) {
   if (!TWELVE_DATA_API_KEY) {
     throw new Error("TWELVE_DATA_API_KEY is missing.");
   }
@@ -77,17 +117,27 @@ async function getMarketCandles(symbol, interval, outputsize = 100) {
         interval,
         outputsize,
         apikey: TWELVE_DATA_API_KEY
-      }
+      },
+      timeout: 15000
     }
   );
 
-  if (response.data.status === "error" || !response.data.values) {
-    throw new Error(
-      response.data.message || "Market data unavailable."
-    );
+  if (response.data.status === "error" || !Array.isArray(response.data.values)) {
+    throw new Error(response.data.message || "Market data unavailable.");
   }
 
   return response.data.values;
+}
+
+function isValidOhlcCandle(candle) {
+  if (!candle || !candle.datetime) return false;
+  const values = [
+    Number(candle.open),
+    Number(candle.high),
+    Number(candle.low),
+    Number(candle.close)
+  ];
+  return values.every(Number.isFinite);
 }
 
 function bodyTop(candle) {
@@ -104,8 +154,14 @@ function candleColor(candle) {
 
   if (close > open) return "BULLISH";
   if (close < open) return "BEARISH";
-
   return "DOJI";
+}
+
+function formatPrice(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+    return "Not formed";
+  }
+  return Number(value).toString();
 }
 
 // =====================================
@@ -113,7 +169,7 @@ function candleColor(candle) {
 // =====================================
 
 function filterCompletedDailyCandles(rawCandles) {
-  const watNow = new Date(Date.now() + 60 * 60 * 1000);
+  const watNow = getWatNow();
   const todayWAT = watNow.toISOString().slice(0, 10);
 
   const candles = [];
@@ -121,37 +177,27 @@ function filterCompletedDailyCandles(rawCandles) {
   const excludedUnfinished = [];
 
   for (const candle of rawCandles) {
-    const date = candle.datetime;
+    if (!candle || !candle.datetime) continue;
 
-    if (!date) continue;
-
+    const date = String(candle.datetime).slice(0, 10);
     const day = new Date(`${date}T00:00:00Z`).getUTCDay();
 
     if (day === 0 || day === 6) {
-      excludedWeekend.push(date);
+      excludedWeekend.push(candle.datetime);
       continue;
     }
 
     if (date >= todayWAT) {
-      excludedUnfinished.push(date);
+      excludedUnfinished.push(candle.datetime);
       continue;
     }
 
-    const values = [
-      Number(candle.open),
-      Number(candle.high),
-      Number(candle.low),
-      Number(candle.close)
-    ];
-
-    if (!values.every(Number.isFinite)) continue;
+    if (!isValidOhlcCandle(candle)) continue;
 
     candles.push(candle);
   }
 
-  candles.sort((a, b) =>
-    a.datetime.localeCompare(b.datetime)
-  );
+  candles.sort((a, b) => a.datetime.localeCompare(b.datetime));
 
   return {
     candles,
@@ -165,7 +211,7 @@ function filterCompletedDailyCandles(rawCandles) {
 // =====================================
 
 function filterCompletedWeeklyCandles(rawCandles) {
-  const watNow = new Date(Date.now() + 60 * 60 * 1000);
+  const watNow = getWatNow();
 
   const currentWeekStart = new Date(watNow);
   currentWeekStart.setUTCHours(0, 0, 0, 0);
@@ -175,35 +221,32 @@ function filterCompletedWeeklyCandles(rawCandles) {
 
   const currentWeekDate = currentWeekStart.toISOString().slice(0, 10);
 
-  const candles = rawCandles.filter(candle => {
-    if (!candle.datetime) return false;
+  const validCandles = rawCandles
+    .filter(isValidOhlcCandle)
+    .sort((a, b) => a.datetime.localeCompare(b.datetime));
 
-    const values = [
-      Number(candle.open),
-      Number(candle.high),
-      Number(candle.low),
-      Number(candle.close)
-    ];
+  const candles = validCandles.filter(
+    candle => String(candle.datetime).slice(0, 10) < currentWeekDate
+  );
 
-    return (
-      candle.datetime < currentWeekDate &&
-      values.every(Number.isFinite)
-    );
-  });
-
-  candles.sort((a, b) =>
-    a.datetime.localeCompare(b.datetime)
+  const developing = validCandles.filter(
+    candle => String(candle.datetime).slice(0, 10) >= currentWeekDate
   );
 
   return {
     candles,
-    developing: rawCandles.filter(candle =>
-      candle.datetime >= currentWeekDate
-    ),
-    excludedUnfinished: rawCandles
-      .filter(candle => candle.datetime >= currentWeekDate)
-      .map(candle => candle.datetime)
+    developing,
+    excludedUnfinished: developing.map(candle => candle.datetime)
   };
+}
+
+function filterCompletedH4Candles(rawCandles) {
+  const valid = rawCandles
+    .filter(isValidOhlcCandle)
+    .sort((a, b) => a.datetime.localeCompare(b.datetime));
+
+  // Exclude the latest potentially developing candle
+  return valid.length > 1 ? valid.slice(0, -1) : valid;
 }
 
 // =====================================
@@ -341,39 +384,25 @@ function identifySwings(candles) {
     const firstColor = candleColor(first);
     const secondColor = candleColor(second);
 
-    // Bullish followed by bearish = Swing High.
-    if (
-      firstColor === "BULLISH" &&
-      secondColor === "BEARISH"
-    ) {
+    if (firstColor === "BULLISH" && secondColor === "BEARISH") {
       swings.push({
         type: "SWING_HIGH",
         date: second.datetime,
         first_candle: first.datetime,
         second_candle: second.datetime,
         index: i,
-        level: Math.max(
-          bodyTop(first),
-          bodyTop(second)
-        )
+        level: Math.max(bodyTop(first), bodyTop(second))
       });
     }
 
-    // Bearish followed by bullish = Swing Low.
-    if (
-      firstColor === "BEARISH" &&
-      secondColor === "BULLISH"
-    ) {
+    if (firstColor === "BEARISH" && secondColor === "BULLISH") {
       swings.push({
         type: "SWING_LOW",
         date: second.datetime,
         first_candle: first.datetime,
         second_candle: second.datetime,
         index: i,
-        level: Math.min(
-          bodyBottom(first),
-          bodyBottom(second)
-        )
+        level: Math.min(bodyBottom(first), bodyBottom(second))
       });
     }
   }
@@ -396,65 +425,42 @@ function detectDailyKeyLevels(candles) {
     const secondColor = candleColor(second);
 
     // A-SHAPE: Bullish followed by bearish.
-    if (
-      firstColor === "BULLISH" &&
-      secondColor === "BEARISH"
-    ) {
+    if (firstColor === "BULLISH" && secondColor === "BEARISH") {
       levels.push({
         type: "A-SHAPE",
         bias: "BEARISH",
         first_candle: first.datetime,
         second_candle: second.datetime,
         formation_index: i,
-        low: Math.min(
-          bodyTop(first),
-          bodyTop(second)
-        ),
-        high: Math.max(
-          bodyTop(first),
-          bodyTop(second)
-        ),
+        low: Math.min(bodyTop(first), bodyTop(second)),
+        high: Math.max(bodyTop(first), bodyTop(second)),
         status: "FORMED"
       });
     }
 
     // V-SHAPE: Bearish followed by bullish.
-    if (
-      firstColor === "BEARISH" &&
-      secondColor === "BULLISH"
-    ) {
+    if (firstColor === "BEARISH" && secondColor === "BULLISH") {
       levels.push({
         type: "V-SHAPE",
         bias: "BULLISH",
         first_candle: first.datetime,
         second_candle: second.datetime,
         formation_index: i,
-        low: Math.min(
-          bodyBottom(first),
-          bodyBottom(second)
-        ),
-        high: Math.max(
-          bodyBottom(first),
-          bodyBottom(second)
-        ),
+        low: Math.min(bodyBottom(first), bodyBottom(second)),
+        high: Math.max(bodyBottom(first), bodyBottom(second)),
         status: "FORMED"
       });
     }
 
     // OPEN/CLOSE: Two consecutive candles of the same colour.
-    if (
-      firstColor === secondColor &&
-      firstColor !== "DOJI"
-    ) {
+    if (firstColor === secondColor && firstColor !== "DOJI") {
       const firstClose = Number(first.close);
       const secondOpen = Number(second.open);
 
       if (firstClose !== secondOpen) {
         levels.push({
           type: "OPEN-CLOSE",
-          bias: firstColor === "BULLISH"
-            ? "BULLISH"
-            : "BEARISH",
+          bias: firstColor === "BULLISH" ? "BULLISH" : "BEARISH",
           first_candle: first.datetime,
           second_candle: second.datetime,
           formation_index: i,
@@ -478,46 +484,28 @@ function detectDailyKeyLevelReactions(candles, levels) {
   const seen = new Set();
 
   for (const level of levels) {
-    for (
-      let i = level.formation_index + 1;
-      i < candles.length;
-      i++
-    ) {
+    for (let i = level.formation_index + 1; i < candles.length; i++) {
       const candle = candles[i];
-
       const high = Number(candle.high);
       const low = Number(candle.low);
       const close = Number(candle.close);
 
-      const touched =
-        high >= level.low && low <= level.high;
-
+      const touched = high >= level.low && low <= level.high;
       if (!touched) continue;
 
       let reaction = null;
 
-      if (
-        level.bias === "BEARISH" &&
-        close < level.low
-      ) {
+      if (level.bias === "BEARISH" && close < level.low) {
         reaction = "BEARISH_KEY_LEVEL_REACTION";
-      }
-
-      if (
-        level.bias === "BULLISH" &&
-        close > level.high
-      ) {
+      } else if (level.bias === "BULLISH" && close > level.high) {
         reaction = "BULLISH_KEY_LEVEL_REACTION";
       }
 
       if (!reaction) continue;
 
-      const uniqueKey =
-        `${level.type}-${level.first_candle}-${level.second_candle}-${candle.datetime}`;
-
+      const uniqueKey = `${level.type}-${level.first_candle}-${level.second_candle}-${candle.datetime}`;
       if (!seen.has(uniqueKey)) {
         seen.add(uniqueKey);
-
         reactions.push({
           type: reaction,
           level_type: level.type,
@@ -534,9 +522,7 @@ function detectDailyKeyLevelReactions(candles, levels) {
     }
   }
 
-  return reactions.sort((a, b) =>
-    b.date.localeCompare(a.date)
-  );
+  return reactions.sort((a, b) => b.date.localeCompare(a.date));
 }
 
 // =====================================
@@ -549,20 +535,14 @@ function trackDailyKeyLevels(candles, levels) {
     let reaction = null;
     let invalidation = null;
 
-    for (
-      let i = level.formation_index + 1;
-      i < candles.length;
-      i++
-    ) {
+    for (let i = level.formation_index + 1; i < candles.length; i++) {
       const candle = candles[i];
       const close = Number(candle.close);
       const high = Number(candle.high);
       const low = Number(candle.low);
 
-      const touched =
-        high >= level.low && low <= level.high;
+      const touched = high >= level.low && low <= level.high;
 
-      // Check for invalidation.
       const invalidated =
         (level.bias === "BEARISH" && close > level.high) ||
         (level.bias === "BULLISH" && close < level.low);
@@ -573,17 +553,12 @@ function trackDailyKeyLevels(candles, levels) {
           date: candle.datetime,
           close
         };
-        reaction = null;
         continue;
       }
 
-      // Check for confirmed reaction.
       if (touched) {
-        const bearishReaction =
-          level.bias === "BEARISH" && close < level.low;
-
-        const bullishReaction =
-          level.bias === "BULLISH" && close > level.high;
+        const bearishReaction = level.bias === "BEARISH" && close < level.low;
+        const bullishReaction = level.bias === "BULLISH" && close > level.high;
 
         if (bearishReaction || bullishReaction) {
           status = "REACTED";
@@ -591,7 +566,6 @@ function trackDailyKeyLevels(candles, levels) {
             date: candle.datetime,
             close
           };
-          invalidation = null;
         }
       }
     }
@@ -613,8 +587,7 @@ function detectDailyStructure(candles) {
   const swings = identifySwings(candles);
   const keyLevels = detectDailyKeyLevels(candles);
   const trackedKeyLevels = trackDailyKeyLevels(candles, keyLevels);
-  const keyLevelReactions =
-    detectDailyKeyLevelReactions(candles, keyLevels);
+  const keyLevelReactions = detectDailyKeyLevelReactions(candles, keyLevels);
 
   let latestSwingHigh = null;
   let latestSwingLow = null;
@@ -640,37 +613,31 @@ function detectDailyStructure(candles) {
 
   for (let i = 0; i < candles.length; i++) {
     const candle = candles[i];
-
     const close = Number(candle.close);
     const high = Number(candle.high);
     const low = Number(candle.low);
 
-    // =====================================
     // BULLISH DAILY KEY-LEVEL CONTACT
-    // =====================================
-
     if (direction === "BULLISH" && !bullishKeyLevelReached) {
       const touchedLevel = keyLevels
-  .filter(level =>
-    level.bias === "BULLISH" &&
-    level.formation_index < i &&
-    high >= level.low &&
-    low <= level.high
-  )
-  .sort((a, b) => b.formation_index - a.formation_index)[0];
+        .filter(
+          level =>
+            level.bias === "BULLISH" &&
+            level.formation_index < i &&
+            high >= level.low &&
+            low <= level.high
+        )
+        .sort((a, b) => b.formation_index - a.formation_index)[0];
 
       if (touchedLevel) {
         bullishKeyLevelReached = true;
-
         bullishKeyLevelContact = {
           date: candle.datetime,
           level_type: touchedLevel.type,
           level_formed: touchedLevel.second_candle,
           level_low: touchedLevel.low,
           level_high: touchedLevel.high,
-          protected_hl: protectedHL
-            ? { ...protectedHL }
-            : null
+          protected_hl: protectedHL ? { ...protectedHL } : null
         };
 
         events.push({
@@ -680,32 +647,27 @@ function detectDailyStructure(candles) {
       }
     }
 
-    // =====================================
     // BEARISH DAILY KEY-LEVEL CONTACT
-    // =====================================
-
     if (direction === "BEARISH" && !bearishKeyLevelReached) {
       const touchedLevel = keyLevels
-  .filter(level =>
-    level.bias === "BEARISH" &&
-    level.formation_index < i &&
-    high >= level.low &&
-    low <= level.high
-  )
-  .sort((a, b) => b.formation_index - a.formation_index)[0];
+        .filter(
+          level =>
+            level.bias === "BEARISH" &&
+            level.formation_index < i &&
+            high >= level.low &&
+            low <= level.high
+        )
+        .sort((a, b) => b.formation_index - a.formation_index)[0];
 
       if (touchedLevel) {
         bearishKeyLevelReached = true;
-
         bearishKeyLevelContact = {
           date: candle.datetime,
           level_type: touchedLevel.type,
           level_formed: touchedLevel.second_candle,
           level_low: touchedLevel.low,
           level_high: touchedLevel.high,
-          protected_lh: protectedLH
-            ? { ...protectedLH }
-            : null
+          protected_lh: protectedLH ? { ...protectedLH } : null
         };
 
         events.push({
@@ -715,18 +677,12 @@ function detectDailyStructure(candles) {
       }
     }
 
-    // =====================================
-    // IDENTIFY NEW SWINGS
-    // =====================================
-
-    const formedSwings = swings.filter(
-      swing => swing.index === i
-    );
+    // IDENTIFY NEW SWINGS FORMED ON THIS CANDLE
+    const formedSwings = swings.filter(swing => swing.index === i);
 
     for (const swing of formedSwings) {
       if (swing.type === "SWING_HIGH") {
         latestSwingHigh = swing;
-
         if (direction === "BEARISH" && bearishLL) {
           pendingLH = swing;
         }
@@ -734,63 +690,60 @@ function detectDailyStructure(candles) {
 
       if (swing.type === "SWING_LOW") {
         latestSwingLow = swing;
-
         if (direction === "BULLISH" && bullishHH) {
           pendingHL = swing;
         }
       }
     }
 
-    // =====================================
     // BEARISH EBO
-    // =====================================
-
     if (
-  bearishKeyLevelReached &&
-  bearishKeyLevelContact?.protected_lh &&
-  i > bearishKeyLevelContact.protected_lh.index &&
-  close > bearishKeyLevelContact.protected_lh.level
+      bearishKeyLevelReached &&
+      bearishKeyLevelContact?.protected_lh &&
+      i > bearishKeyLevelContact.protected_lh.index &&
+      close > bearishKeyLevelContact.protected_lh.level
     ) {
+      const targetLH = bearishKeyLevelContact.protected_lh;
+
       events.push({
         type: "BEARISH_EBO",
         date: candle.datetime,
         close,
-        broken_level: protectedLH.level,
-protected_lh_date: protectedLH.date
+        broken_level: targetLH.level,
+        protected_lh_date: targetLH.date
       });
 
+      bearishKeyLevelReached = false;
+      bearishKeyLevelContact = null;
       protectedHL = null;
       pendingHL = null;
     }
 
-    // =====================================
     // BULLISH EBO
-    // =====================================
-
     if (
-  bullishKeyLevelReached &&
-  bullishKeyLevelContact?.protected_hl &&
-  i > bullishKeyLevelContact.protected_hl.index &&
-  close < bullishKeyLevelContact.protected_hl.level
+      bullishKeyLevelReached &&
+      bullishKeyLevelContact?.protected_hl &&
+      i > bullishKeyLevelContact.protected_hl.index &&
+      close < bullishKeyLevelContact.protected_hl.level
     ) {
+      const targetHL = bullishKeyLevelContact.protected_hl;
+
       events.push({
         type: "BULLISH_EBO",
         date: candle.datetime,
         close,
-        broken_level: bullishKeyLevelContact.protected_hl.level,
-protected_hl_date: bullishKeyLevelContact.protected_hl.date
+        broken_level: targetHL.level,
+        protected_hl_date: targetHL.date
       });
 
+      bullishKeyLevelReached = false;
+      bullishKeyLevelContact = null;
       protectedLH = null;
       pendingLH = null;
     }
 
-    // =====================================
-    // CONFIRM PROTECTED LH
-    // Only before bearish key-level contact
-    // =====================================
-
-    if (
+    // CONFIRM PROTECTED LH (only before bearish key-level contact)
+     if (
       direction === "BEARISH" &&
       !bearishKeyLevelReached &&
       bearishLL &&
@@ -814,11 +767,6 @@ protected_hl_date: bullishKeyLevelContact.protected_hl.date
         continuation_date: candle.datetime
       });
     }
-
-    // =====================================
-    // CONFIRM PROTECTED HL
-    // Only before bullish key-level contact
-    // =====================================
 
     if (
       direction === "BULLISH" &&
@@ -845,16 +793,11 @@ protected_hl_date: bullishKeyLevelContact.protected_hl.date
       });
     }
 
-    // =====================================
-    // CONFIRM NEW LL
-    // =====================================
-
     if (
       latestSwingLow &&
       i > latestSwingLow.index &&
       close < latestSwingLow.level &&
-      (!bearishLL ||
-        bearishLL.broken_swing_low !== latestSwingLow.level)
+      (!bearishLL || bearishLL.broken_swing_low !== latestSwingLow.level)
     ) {
       bearishLL = {
         date: candle.datetime,
@@ -883,16 +826,11 @@ protected_hl_date: bullishKeyLevelContact.protected_hl.date
       });
     }
 
-    // =====================================
-    // CONFIRM NEW HH
-    // =====================================
-
     if (
       latestSwingHigh &&
       i > latestSwingHigh.index &&
       close > latestSwingHigh.level &&
-      (!bullishHH ||
-        bullishHH.broken_swing_high !== latestSwingHigh.level)
+      (!bullishHH || bullishHH.broken_swing_high !== latestSwingHigh.level)
     ) {
       bullishHH = {
         date: candle.datetime,
@@ -971,14 +909,11 @@ function detectH4Structure(candles) {
     const candle = candles[i];
     const close = Number(candle.close);
 
-    const formedSwings = swings.filter(
-      swing => swing.index === i
-    );
+    const formedSwings = swings.filter(swing => swing.index === i);
 
     for (const swing of formedSwings) {
       if (swing.type === "SWING_HIGH") {
         latestSwingHigh = swing;
-
         if (direction === "BEARISH" && bearishLL) {
           pendingLH = swing;
         }
@@ -986,19 +921,13 @@ function detectH4Structure(candles) {
 
       if (swing.type === "SWING_LOW") {
         latestSwingLow = swing;
-
         if (direction === "BULLISH" && bullishHH) {
           pendingHL = swing;
         }
       }
     }
 
-    // BEARISH EBO
-    if (
-      protectedHL &&
-      i > protectedHL.index &&
-      close < protectedHL.level
-    ) {
+    if (protectedHL && i > protectedHL.index && close < protectedHL.level) {
       events.push({
         type: "BEARISH_EBO",
         date: candle.datetime,
@@ -1010,12 +939,7 @@ function detectH4Structure(candles) {
       pendingHL = null;
     }
 
-    // BULLISH EBO
-    if (
-      protectedLH &&
-      i > protectedLH.index &&
-      close > protectedLH.level
-    ) {
+    if (protectedLH && i > protectedLH.index && close > protectedLH.level) {
       events.push({
         type: "BULLISH_EBO",
         date: candle.datetime,
@@ -1027,7 +951,6 @@ function detectH4Structure(candles) {
       pendingLH = null;
     }
 
-    // CONFIRM PROTECTED LH
     if (
       direction === "BEARISH" &&
       bearishLL &&
@@ -1049,7 +972,6 @@ function detectH4Structure(candles) {
       });
     }
 
-    // CONFIRM PROTECTED HL
     if (
       direction === "BULLISH" &&
       bullishHH &&
@@ -1071,13 +993,11 @@ function detectH4Structure(candles) {
       });
     }
 
-    // CONFIRM NEW LL
     if (
       latestSwingLow &&
       i > latestSwingLow.index &&
       close < latestSwingLow.level &&
-      (!bearishLL ||
-        bearishLL.broken_swing_low !== latestSwingLow.level)
+      (!bearishLL || bearishLL.broken_swing_low !== latestSwingLow.level)
     ) {
       bearishLL = {
         date: candle.datetime,
@@ -1091,7 +1011,6 @@ function detectH4Structure(candles) {
       bullishHH = null;
       pendingHL = null;
       protectedHL = null;
-
       pendingLH = null;
       protectedLH = null;
 
@@ -1102,13 +1021,11 @@ function detectH4Structure(candles) {
       });
     }
 
-    // CONFIRM NEW HH
     if (
       latestSwingHigh &&
       i > latestSwingHigh.index &&
       close > latestSwingHigh.level &&
-      (!bullishHH ||
-        bullishHH.broken_swing_high !== latestSwingHigh.level)
+      (!bullishHH || bullishHH.broken_swing_high !== latestSwingHigh.level)
     ) {
       bullishHH = {
         date: candle.datetime,
@@ -1122,7 +1039,6 @@ function detectH4Structure(candles) {
       bearishLL = null;
       pendingLH = null;
       protectedLH = null;
-
       pendingHL = null;
       protectedHL = null;
 
@@ -1149,26 +1065,23 @@ function detectH4Structure(candles) {
 }
 
 // =====================================
-// HOME
+// HOME & TELEGRAM WEBHOOK (PART 1)
 // =====================================
 
 app.get("/", (req, res) => {
   res.send("DEE SM SLK BOT is running.");
 });
 
-// =====================================
-// TELEGRAM WEBHOOK
-// =====================================
-
 app.post("/webhook", async (req, res) => {
   res.sendStatus(200);
 
-  try {
-    const message = req.body.message;
+  let chatId = null;
 
+  try {
+    const message = req.body?.message;
     if (!message || !message.text) return;
 
-    const chatId = message.chat.id;
+    chatId = parseChatId(message.chat.id);
     const parts = message.text.trim().split(/\s+/);
 
     const command = parts[0].split("@")[0].toLowerCase();
@@ -1178,14 +1091,14 @@ app.post("/webhook", async (req, res) => {
       await sendMessage(
         chatId,
         `<b>DEE SM SLK BOT</b>\n\n` +
-        `/help - View commands\n` +
-        `/add GBPUSD - Add pair\n` +
-        `/remove GBPUSD - Remove pair\n` +
-        `/watchlist - View pairs\n` +
-        `/check GBPUSD - Check pair\n` +
-        `/pause - Pause monitoring\n` +
-        `/resume - Resume monitoring\n` +
-        `/weekly - Previous week's events`
+          `/help - View commands\n` +
+          `/add GBPUSD - Add pair\n` +
+          `/remove GBPUSD - Remove pair\n` +
+          `/watchlist - View pairs\n` +
+          `/check GBPUSD - Check pair\n` +
+          `/pause - Pause monitoring\n` +
+          `/resume - Resume monitoring\n` +
+          `/weekly - Previous week's events`
       );
       return;
     }
@@ -1194,13 +1107,13 @@ app.post("/webhook", async (req, res) => {
       await sendMessage(
         chatId,
         `<b>BOT COMMANDS</b>\n\n` +
-        `/add GBPUSD\n` +
-        `/remove GBPUSD\n` +
-        `/watchlist\n` +
-        `/check GBPUSD\n` +
-        `/pause\n` +
-        `/resume\n` +
-        `/weekly`
+          `/add GBPUSD\n` +
+          `/remove GBPUSD\n` +
+          `/watchlist\n` +
+          `/check GBPUSD\n` +
+          `/pause\n` +
+          `/resume\n` +
+          `/weekly`
       );
       return;
     }
@@ -1259,9 +1172,9 @@ app.post("/webhook", async (req, res) => {
         return;
       }
 
-      const list = pairs.map(pair =>
-        `${pair.active ? "🟢" : "⏸"} ${pair.symbol}`
-      ).join("\n");
+      const list = pairs
+        .map(pair => `${pair.active ? "🟢" : "⏸"} ${pair.symbol}`)
+        .join("\n");
 
       await sendMessage(chatId, `<b>YOUR WATCHLIST</b>\n\n${list}`);
       return;
@@ -1281,7 +1194,7 @@ app.post("/webhook", async (req, res) => {
         active ? "Monitoring resumed." : "Monitoring paused."
       );
       return;
-          }
+        }
 
       if (command === "/check") {
       if (!argument) {
@@ -1290,171 +1203,159 @@ app.post("/webhook", async (req, res) => {
       }
 
       const symbol = normalizeSymbol(argument);
+      const lockKey = `${chatId}:${symbol}`;
 
-      await sendMessage(chatId, `Checking ${symbol} D1 structure...`);
-
-      const raw = await getMarketCandles(symbol, "1day", 100);
-      const filtered = filterCompletedDailyCandles(raw);
-      const candles = filtered.candles;
-
-      if (candles.length < 5) {
-        await sendMessage(chatId, "Not enough completed D1 candles.");
+      if (activeChecks.has(lockKey)) {
+        await sendMessage(chatId, `Already checking ${symbol}. Please wait...`);
         return;
       }
 
-      const result = detectDailyStructure(candles);
+      activeChecks.add(lockKey);
+
+      try {
+        await sendMessage(chatId, `Checking ${symbol} D1 structure...`);
+
+        const raw = await getMarketCandles(symbol, "1day", 150);
+        const filtered = filterCompletedDailyCandles(raw);
+        const candles = filtered.candles;
+
+        if (candles.length < 5) {
+          await sendMessage(chatId, "Not enough completed D1 candles.");
+          return;
+        }
+
+        const result = detectDailyStructure(candles);
+
         const keyLevelSummary = {
-  active: result.trackedKeyLevels.filter(
-    level => level.status === "ACTIVE"
-  ).length,
+          active: result.trackedKeyLevels.filter(level => level.status === "ACTIVE").length,
+          reacted: result.trackedKeyLevels.filter(level => level.status === "REACTED").length,
+          invalidated: result.trackedKeyLevels.filter(level => level.status === "INVALIDATED").length
+        };
 
-  reacted: result.trackedKeyLevels.filter(
-    level => level.status === "REACTED"
-  ).length,
+        const keyLevelSummaryText =
+          `<b>DAILY KEY-LEVEL SUMMARY</b>\n` +
+          `🟢 Active: ${keyLevelSummary.active}\n` +
+          `🔵 Reacted: ${keyLevelSummary.reacted}\n` +
+          `🔴 Invalidated: ${keyLevelSummary.invalidated}\n\n`;
 
-  invalidated: result.trackedKeyLevels.filter(
-    level => level.status === "INVALIDATED"
-  ).length
-};
-
-const keyLevelSummaryText =
-  `<b>DAILY KEY-LEVEL SUMMARY</b>\n` +
-  `🟢 Active: ${keyLevelSummary.active}\n` +
-  `🔵 Reacted: ${keyLevelSummary.reacted}\n` +
-  `🔴 Invalidated: ${keyLevelSummary.invalidated}\n\n`;
         const statusText = ["ACTIVE", "REACTED", "INVALIDATED"]
-  .map(status => {
-    const levels = result.trackedKeyLevels
-      .filter(level => level.status === status)
-      .slice(-5);
+          .map(status => {
+            const levels = result.trackedKeyLevels
+              .filter(level => level.status === status)
+              .slice(-5);
 
-    let details = "None";
+            let details = "None";
 
-    if (levels.length > 0) {
-      details = levels.map(level => {
-        const eventDate =
-          status === "REACTED"
-            ? level.reaction?.date
-            : status === "INVALIDATED"
-              ? level.invalidation?.date
-              : null;
+            if (levels.length > 0) {
+              details = levels
+                .map(level => {
+                  const eventDate =
+                    status === "REACTED"
+                      ? level.reaction?.date
+                      : status === "INVALIDATED"
+                        ? level.invalidation?.date
+                        : null;
 
-        return (
-          `• ${level.type}\n` +
-          `  Bias: ${level.bias} | Formed: ${level.second_candle}\n` +
-          (eventDate ? `  ${status} DATE: ${eventDate}\n` : "") +
-          `  Zone: ${level.low} – ${level.high}`
-        );
-      }).join("\n");
-    }
+                  return (
+                    `• ${level.type}\n` +
+                    `  Bias: ${level.bias} | Formed: ${level.second_candle}\n` +
+                    (eventDate ? `  ${status} DATE: ${eventDate}\n` : "") +
+                    `  Zone: ${level.low} – ${level.high}`
+                  );
+                })
+                .join("\n");
+            }
 
-    return `<b>${status} LEVELS</b>\n${details}`;
-  })
-  .join("\n\n");
+            return `<b>${status} LEVELS</b>\n${details}`;
+          })
+          .join("\n\n");
+
         const reactionText = result.keyLevelReactions.length
-  ? result.keyLevelReactions.slice(0,5).map(reaction =>
-      `• ${reaction.type} — ${reaction.date}\n` +
-      `  Level: ${reaction.level_type} | Formed: ${reaction.level_formed}\n` +
-`  Close: ${reaction.close}`
-    ).join("\n")
-  : "No confirmed key-level reactions.";
-      const latestCandle = candles[candles.length - 1];
+          ? result.keyLevelReactions
+              .slice(0, 5)
+              .map(
+                reaction =>
+                  `• ${reaction.type} — ${reaction.date}\n` +
+                  `  Level: ${reaction.level_type} | Formed: ${reaction.level_formed}\n` +
+                  `  Close: ${reaction.close}`
+              )
+              .join("\n")
+          : "No confirmed key-level reactions.";
 
-      const price = value =>
-        value === null || value === undefined
-          ? "Not formed"
-          : Number(value).toString();
+        const latestCandle = candles[candles.length - 1];
 
-      const describeSwing = swing =>
-        swing
-          ? `${swing.date} | Level: ${price(swing.level)}`
-          : "Not formed";
+        const describeSwing = swing =>
+          swing ? `${swing.date} | Level: ${formatPrice(swing.level)}` : "Not formed";
 
-      const describeStructure = (item, label) =>
-        item
-          ? `${label}: ${item.date} | Body level: ${price(item.level)}`
-          : `${label}: Not confirmed`;
+        const describeStructure = (item, label) =>
+          item
+            ? `${label}: ${item.date} | Body level: ${formatPrice(item.level)}`
+            : `${label}: Not confirmed`;
 
-      const recentEvents = result.events.slice(-10);
+        const recentEvents = result.events.slice(-10);
 
-      const eventText = recentEvents.length
-        ? recentEvents.map(event => {
-            if (event.type === "LL_CONFIRMED")
-              return `• LL confirmed — ${event.date}`;
+        const eventText = recentEvents.length
+          ? recentEvents
+              .map(event => {
+                if (event.type === "LL_CONFIRMED") return `• LL confirmed — ${event.date}`;
+                if (event.type === "HH_CONFIRMED") return `• HH confirmed — ${event.date}`;
+                if (event.type === "PROTECTED_LH_CONFIRMED") return `• Protected LH — ${event.date}`;
+                if (event.type === "PROTECTED_HL_CONFIRMED") return `• Protected HL — ${event.date}`;
+                if (event.type === "BULLISH_EBO") return `• Bullish EBO — ${event.date}`;
+                if (event.type === "BEARISH_EBO") return `• Bearish EBO — ${event.date}`;
+                return `• ${event.type} — ${event.date}`;
+              })
+              .join("\n")
+          : "No confirmed structure events found.";
 
-            if (event.type === "HH_CONFIRMED")
-              return `• HH confirmed — ${event.date}`;
+        const report =
+          `<b>${symbol} — D1 STRUCTURE</b>\n` +
+          `Latest completed candle: ${latestCandle.datetime}\n\n` +
+          `<b>SWINGS</b>\n` +
+          `Swing High: ${describeSwing(result.latestSwingHigh)}\n` +
+          `Swing Low: ${describeSwing(result.latestSwingLow)}\n\n` +
+          `<b>BEARISH STRUCTURE</b>\n` +
+          `${describeStructure(result.bearishLL, "LL")}\n` +
+          `Pending LH: ${describeSwing(result.pendingLH)}\n` +
+          `Protected LH: ${describeSwing(result.protectedLH)}\n\n` +
+          `<b>BULLISH STRUCTURE</b>\n` +
+          `${describeStructure(result.bullishHH, "HH")}\n` +
+          `Pending HL: ${describeSwing(result.pendingHL)}\n` +
+          `Protected HL: ${describeSwing(result.protectedHL)}\n\n` +
+          `${keyLevelSummaryText}` +
+          `<b>DAILY KEY-LEVEL STATUS</b>\n${statusText}\n\n` +
+          `<b>DAILY KEY-LEVEL REACTIONS</b>\n${reactionText}\n\n` +
+          `<b>RECENT EVENTS</b>\n${eventText}\n\n` +
+          `<i>Structure uses candle bodies. Key-level contact recognises wick or body interaction; confirmation requires a close beyond the zone.</i>`;
 
-            if (event.type === "PROTECTED_LH_CONFIRMED")
-              return `• Protected LH — ${event.date}`;
-
-            if (event.type === "PROTECTED_HL_CONFIRMED")
-              return `• Protected HL — ${event.date}`;
-
-            if (event.type === "BULLISH_EBO")
-              return `• Bullish EBO — ${event.date}`;
-
-            if (event.type === "BEARISH_EBO")
-              return `• Bearish EBO — ${event.date}`;
-
-            return `• ${event.type} — ${event.date}`;
-          }).join("\n")
-        : "No confirmed structure events found.";
-
-      const report =
-        `<b>${symbol} — D1 STRUCTURE</b>\n` +
-        `Latest completed candle: ${latestCandle.datetime}\n\n` +
-        `<b>SWINGS</b>\n` +
-        `Swing High: ${describeSwing(result.latestSwingHigh)}\n` +
-        `Swing Low: ${describeSwing(result.latestSwingLow)}\n\n` +
-        `<b>BEARISH STRUCTURE</b>\n` +
-        `${describeStructure(result.bearishLL, "LL")}\n` +
-        `Pending LH: ${describeSwing(result.pendingLH)}\n` +
-        `Protected LH: ${describeSwing(result.protectedLH)}\n\n` +
-        `<b>BULLISH STRUCTURE</b>\n` +
-        `${describeStructure(result.bullishHH, "HH")}\n` +
-        `Pending HL: ${describeSwing(result.pendingHL)}\n` +
-        `Protected HL: ${describeSwing(result.protectedHL)}\n\n` +
-        `${keyLevelSummaryText}` +
-        `<b>DAILY KEY-LEVEL STATUS</b>\n${statusText}\n\n` +
-        `<b>DAILY KEY-LEVEL REACTIONS</b>\n${reactionText}\n\n` +
-        `<b>RECENT EVENTS</b>\n${eventText}\n\n` +
-        `<i>Structure uses candle bodies. Key-level contact recognises wick or body interaction; confirmation requires a close beyond the zone.</i>`;
-
-      await sendMessage(chatId, report);
+        await sendMessage(chatId, report);
+      } finally {
+        activeChecks.delete(lockKey);
+      }
       return;
     }
 
     if (command === "/weekly") {
       const now = new Date();
-      const watOffset = 60 * 60 * 1000;
-      const watNow = new Date(now.getTime() + watOffset);
+      const watNow = getWatNow(now);
 
       const thisSunday = new Date(watNow);
-      thisSunday.setUTCDate(
-        watNow.getUTCDate() - watNow.getUTCDay()
-      );
+      thisSunday.setUTCDate(watNow.getUTCDate() - watNow.getUTCDay());
       thisSunday.setUTCHours(0, 0, 0, 0);
 
       const previousSunday = new Date(thisSunday);
       previousSunday.setUTCDate(previousSunday.getUTCDate() - 7);
 
-      const previousSaturday = new Date(thisSunday);
-      previousSaturday.setUTCMilliseconds(-1);
+      const previousSaturdayEnd = new Date(thisSunday.getTime() - 1);
 
-      const from = new Date(
-        previousSunday.getTime() - watOffset
-      ).toISOString();
-
-      const to = new Date(
-        previousSaturday.getTime() - watOffset
-      ).toISOString();
+      const from = new Date(previousSunday.getTime() - WAT_OFFSET_MS).toISOString();
+      const to = new Date(previousSaturdayEnd.getTime() - WAT_OFFSET_MS).toISOString();
 
       const events = await databaseRequest(
         `storyline_events?chat_id=eq.${chatId}` +
-        `&created_at=gte.${encodeURIComponent(from)}` +
-        `&created_at=lte.${encodeURIComponent(to)}` +
-        `&order=created_at.asc`
+          `&created_at=gte.${encodeURIComponent(from)}` +
+          `&created_at=lte.${encodeURIComponent(to)}` +
+          `&order=created_at.asc`
       );
 
       if (!events.length) {
@@ -1462,30 +1363,26 @@ const keyLevelSummaryText =
         return;
       }
 
-      const report = events.map(event =>
-        `• ${event.symbol || "Market"} — ${event.event_type || event.event || "Event"}`
-      ).join("\n");
+      const report = events
+        .map(
+          event =>
+            `• ${event.symbol || "Market"} — ${event.event_type || event.event || "Event"}`
+        )
+        .join("\n");
 
       await sendMessage(chatId, `<b>LAST WEEK'S EVENTS</b>\n\n${report}`);
-      return;
     }
   } catch (error) {
-    console.error(
-      "Webhook error:",
-      error.response?.data || error.message
-    );
+    console.error("Webhook error:", error.response?.data || error.message);
 
-    if (req.body.message?.chat?.id) {
-      await sendMessage(
-        req.body.message.chat.id,
-        "Something went wrong processing that command."
-      );
+    if (chatId) {
+      await sendMessage(chatId, "Something went wrong processing that command.");
     }
   }
 });
 
 // =====================================
-// MARKET DATA TEST
+// MARKET DATA & W1 TEST ENDPOINTS
 // =====================================
 
 app.get("/test-market-data", async (req, res) => {
@@ -1494,11 +1391,7 @@ app.get("/test-market-data", async (req, res) => {
     const data = {};
 
     for (const timeframe of ["1week", "1day", "4h"]) {
-      data[timeframe] = await getMarketCandles(
-        symbol,
-        timeframe,
-        10
-      );
+      data[timeframe] = await getMarketCandles(symbol, timeframe, 10);
     }
 
     res.json({
@@ -1514,18 +1407,13 @@ app.get("/test-market-data", async (req, res) => {
   }
 });
 
-// =====================================
-// WEEKLY A/V
-// =====================================
-
 app.get("/test-w1-av", async (req, res) => {
   try {
     const symbol = normalizeSymbol(req.query.symbol);
 
     const raw = await getMarketCandles(symbol, "1week", 100);
     const filtered = filterCompletedWeeklyCandles(raw);
-    const candles = filtered.candles;
-    const developing = filtered.developing;
+    const { candles, developing } = filtered;
 
     const formations = [];
 
@@ -1577,18 +1465,13 @@ app.get("/test-w1-av", async (req, res) => {
   }
 });
 
-// =====================================
-// WEEKLY OPEN/CLOSE
-// =====================================
-
 app.get("/test-w1-open-close", async (req, res) => {
   try {
     const symbol = normalizeSymbol(req.query.symbol);
 
     const raw = await getMarketCandles(symbol, "1week", 100);
     const filtered = filterCompletedWeeklyCandles(raw);
-    const candles = filtered.candles;
-    const developing = filtered.developing;
+    const { candles, developing } = filtered;
 
     const formations = [];
 
@@ -1602,13 +1485,9 @@ app.get("/test-w1-open-close", async (req, res) => {
       const firstClose = Number(first.close);
       const secondOpen = Number(second.open);
 
-      // Actual gap required; exact equality does not count.
       if (firstClose === secondOpen) continue;
 
-      if (
-        firstColor === "BULLISH" &&
-        secondColor === "BULLISH"
-      ) {
+      if (firstColor === "BULLISH" && secondColor === "BULLISH") {
         formations.push({
           type: "BULLISH-OPEN-CLOSE",
           first_candle: first.datetime,
@@ -1619,10 +1498,7 @@ app.get("/test-w1-open-close", async (req, res) => {
         });
       }
 
-      if (
-        firstColor === "BEARISH" &&
-        secondColor === "BEARISH"
-      ) {
+      if (firstColor === "BEARISH" && secondColor === "BEARISH") {
         formations.push({
           type: "BEARISH-OPEN-CLOSE",
           first_candle: first.datetime,
@@ -1650,10 +1526,6 @@ app.get("/test-w1-open-close", async (req, res) => {
   }
 });
 
-// =====================================
-// W1 STORYLINE TEST
-// =====================================
-
 app.get("/test-w1-storyline", async (req, res) => {
   try {
     const symbol = normalizeSymbol(req.query.symbol);
@@ -1672,7 +1544,6 @@ app.get("/test-w1-storyline", async (req, res) => {
       latest_completed_candle: candles[candles.length - 1] || null,
       developing: filtered.developing
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -1682,14 +1553,14 @@ app.get("/test-w1-storyline", async (req, res) => {
 });
 
 // =====================================
-// D1 CANDLE TEST
+// D1 & H4 TEST ENDPOINTS
 // =====================================
 
 app.get("/test-d1-candles", async (req, res) => {
   try {
     const symbol = normalizeSymbol(req.query.symbol);
 
-    const raw = await getMarketCandles(symbol, "1day", 100);
+    const raw = await getMarketCandles(symbol, "1day", 150);
     const filtered = filterCompletedDailyCandles(raw);
 
     res.json({
@@ -1710,15 +1581,11 @@ app.get("/test-d1-candles", async (req, res) => {
   }
 });
 
-// =====================================
-// NEW D1 STRUCTURE TEST
-// =====================================
-
 app.get("/test-d1-ebo", async (req, res) => {
   try {
     const symbol = normalizeSymbol(req.query.symbol);
 
-    const raw = await getMarketCandles(symbol, "1day", 100);
+    const raw = await getMarketCandles(symbol, "1day", 150);
     const filtered = filterCompletedDailyCandles(raw);
     const candles = filtered.candles;
 
@@ -1736,30 +1603,22 @@ app.get("/test-d1-ebo", async (req, res) => {
       success: true,
       symbol,
       timeframe: "D1",
-
-      latest_completed_candle:
-        candles[candles.length - 1].datetime,
-
+      latest_completed_candle: candles[candles.length - 1].datetime,
       latest_swing_high: result.latestSwingHigh,
       latest_swing_low: result.latestSwingLow,
-
       bearish_structure: {
         LL: result.bearishLL,
         pending_LH: result.pendingLH,
         protected_LH: result.protectedLH
       },
-
       bullish_structure: {
         HH: result.bullishHH,
         pending_HL: result.pendingHL,
         protected_HL: result.protectedHL
       },
-
       events: result.events,
-
       excluded_weekend_dates: filtered.excludedWeekend,
       excluded_unfinished_dates: filtered.excludedUnfinished,
-
       note:
         "Swing levels use consecutive two-candle formations and candle bodies. EBO requires a completed candle body close beyond the protected swing."
     });
@@ -1773,15 +1632,11 @@ app.get("/test-d1-ebo", async (req, res) => {
   }
 });
 
-// =====================================
-// D1 KEY-LEVEL TEST
-// =====================================
-
 app.get("/test-d1-key-levels", async (req, res) => {
   try {
     const symbol = normalizeSymbol(req.query.symbol);
 
-    const raw = await getMarketCandles(symbol, "1day", 100);
+    const raw = await getMarketCandles(symbol, "1day", 150);
     const filtered = filterCompletedDailyCandles(raw);
     const candles = filtered.candles;
 
@@ -1805,16 +1660,12 @@ app.get("/test-d1-key-levels", async (req, res) => {
   }
 });
 
-// =====================================
-// H4 CANDLE TEST
-// =====================================
-
 app.get("/test-h4-candles", async (req, res) => {
   try {
     const symbol = normalizeSymbol(req.query.symbol);
 
-    const raw = await getMarketCandles(symbol, "4h", 100);
-    const candles = raw.slice(1).reverse();
+    const raw = await getMarketCandles(symbol, "4h", 150);
+    const candles = filterCompletedH4Candles(raw);
 
     res.json({
       success: true,
@@ -1834,8 +1685,8 @@ app.get("/test-h4-ebo", async (req, res) => {
   try {
     const symbol = normalizeSymbol(req.query.symbol || "GBPUSD");
 
-    const raw = await getMarketCandles(symbol, "4h", 100);
-    const candles = raw.slice(1).reverse();
+    const raw = await getMarketCandles(symbol, "4h", 150);
+    const candles = filterCompletedH4Candles(raw);
 
     const result = detectH4Structure(candles);
 
@@ -1843,10 +1694,9 @@ app.get("/test-h4-ebo", async (req, res) => {
       success: true,
       symbol,
       timeframe: "H4",
-      latestCandle: candles[candles.length - 1],
+      latestCandle: candles[candles.length - 1] || null,
       ...result
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -1854,6 +1704,7 @@ app.get("/test-h4-ebo", async (req, res) => {
     });
   }
 });
+
 // =====================================
 // SERVER START
 // =====================================
@@ -1861,3 +1712,5 @@ app.get("/test-h4-ebo", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`DEE SM SLK BOT running on port ${PORT}`);
 });
+        
+          
