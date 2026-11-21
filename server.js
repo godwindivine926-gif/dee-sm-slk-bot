@@ -872,9 +872,6 @@ protected_hl_date: bullishKeyLevelContact.protected_hl.date
       bullishKeyLevelReached = false;
       bullishKeyLevelContact = null;
 
-      pendingLH = null;
-      protectedLH = null;
-
       bearishKeyLevelReached = false;
       bearishKeyLevelContact = null;
 
@@ -912,9 +909,6 @@ protected_hl_date: bullishKeyLevelContact.protected_hl.date
 
       bearishKeyLevelReached = false;
       bearishKeyLevelContact = null;
-
-      pendingHL = null;
-      protectedHL = null;
 
       bullishKeyLevelReached = false;
       bullishKeyLevelContact = null;
