@@ -167,7 +167,6 @@ function filterCompletedDailyCandles(rawCandles) {
 function filterCompletedWeeklyCandles(rawCandles) {
   const watNow = new Date(Date.now() + 60 * 60 * 1000);
 
-  // Forex weekly candles begin on Sunday.
   const currentWeekStart = new Date(watNow);
   currentWeekStart.setUTCHours(0, 0, 0, 0);
   currentWeekStart.setUTCDate(
@@ -197,21 +196,22 @@ function filterCompletedWeeklyCandles(rawCandles) {
   );
 
   return {
-  candles,
-  developing: rawCandles.filter(candle =>
-    candle.datetime >= currentWeekDate
-  ),
-  excludedUnfinished: rawCandles
-    .filter(candle => candle.datetime >= currentWeekDate)
-    .map(candle => candle.datetime)
-};
+    candles,
+    developing: rawCandles.filter(candle =>
+      candle.datetime >= currentWeekDate
+    ),
+    excludedUnfinished: rawCandles
+      .filter(candle => candle.datetime >= currentWeekDate)
+      .map(candle => candle.datetime)
+  };
+}
 
-  // =====================================
+// =====================================
 // W1 STORYLINE DETECTOR
 // =====================================
 
 function detectWeeklyStoryline(candles) {
-  if (!candles || candles.length < 2) {
+  if (!Array.isArray(candles) || candles.length < 2) {
     return {
       status: "INSUFFICIENT DATA",
       bias: "NONE",
@@ -224,65 +224,98 @@ function detectWeeklyStoryline(candles) {
 
   const previousHigh = Number(previous.high);
   const previousLow = Number(previous.low);
-
   const latestHigh = Number(latest.high);
   const latestLow = Number(latest.low);
   const latestClose = Number(latest.close);
 
-  // Previous weekly high swept, then price closed below it.
-  if (
-    latestHigh > previousHigh &&
-    latestClose < previousHigh
-  ) {
+  if (latestHigh > previousHigh && latestClose < previousHigh) {
     return {
       status: "DEVELOPING",
       bias: "BEARISH",
-      reason: "Previous Weekly High swept and weekly candle closed below it.",
+      formation: "PREVIOUS-WEEK-HIGH-SWEEP",
+      reason: "Previous Weekly High swept and candle closed below it.",
       key_level: previousHigh,
+      first_candle: previous.datetime,
       reaction_date: latest.datetime
     };
   }
 
-  // Previous weekly low swept, then price closed above it.
-  if (
-    latestLow < previousLow &&
-    latestClose > previousLow
-  ) {
+  if (latestLow < previousLow && latestClose > previousLow) {
     return {
       status: "DEVELOPING",
       bias: "BULLISH",
-      reason: "Previous Weekly Low swept and weekly candle closed above it.",
+      formation: "PREVIOUS-WEEK-LOW-SWEEP",
+      reason: "Previous Weekly Low swept and candle closed above it.",
       key_level: previousLow,
+      first_candle: previous.datetime,
       reaction_date: latest.datetime
     };
   }
 
-  // Two-candle A/V formation.
   const previousColor = candleColor(previous);
   const latestColor = candleColor(latest);
 
-  if (
-    previousColor === "BULLISH" &&
-    latestColor === "BEARISH"
-  ) {
+  if (previousColor === "BULLISH" && latestColor === "BEARISH") {
     return {
       status: "DEVELOPING",
       bias: "BEARISH",
+      formation: "A-SHAPE",
       reason: "Weekly A-shape formation detected.",
       key_level: Math.max(bodyTop(previous), bodyTop(latest)),
+      first_candle: previous.datetime,
       reaction_date: latest.datetime
     };
   }
 
+  if (previousColor === "BEARISH" && latestColor === "BULLISH") {
+    return {
+      status: "DEVELOPING",
+      bias: "BULLISH",
+      formation: "V-SHAPE",
+      reason: "Weekly V-shape formation detected.",
+      key_level: Math.min(bodyBottom(previous), bodyBottom(latest)),
+      first_candle: previous.datetime,
+      reaction_date: latest.datetime
+    };
+  }
+
+  const firstClose = Number(previous.close);
+  const secondOpen = Number(latest.open);
+
   if (
-    previousColor === "BEARISH" &&
+    firstClose !== secondOpen &&
+    previousColor === "BULLISH" &&
     latestColor === "BULLISH"
   ) {
     return {
       status: "DEVELOPING",
       bias: "BULLISH",
-      reason: "Weekly V-shape formation detected.",
-      key_level: Math.min(bodyBottom(previous), bodyBottom(latest)),
+      formation: "BULLISH-OPEN-CLOSE",
+      reason: "Two consecutive bullish weekly candles formed an Open/Close gap.",
+      key_level: {
+        low: Math.min(firstClose, secondOpen),
+        high: Math.max(firstClose, secondOpen)
+      },
+      first_candle: previous.datetime,
+      reaction_date: latest.datetime
+    };
+  }
+
+  if (
+    firstClose !== secondOpen &&
+    previousColor === "BEARISH" &&
+    latestColor === "BEARISH"
+  ) {
+    return {
+      status: "DEVELOPING",
+      bias: "BEARISH",
+      formation: "BEARISH-OPEN-CLOSE",
+      reason: "Two consecutive bearish weekly candles formed an Open/Close gap.",
+      key_level: {
+        low: Math.min(firstClose, secondOpen),
+        high: Math.max(firstClose, secondOpen)
+      },
+      first_candle: previous.datetime,
       reaction_date: latest.datetime
     };
   }
@@ -290,10 +323,10 @@ function detectWeeklyStoryline(candles) {
   return {
     status: "NO STORYLINE",
     bias: "NONE",
-    reason: "No qualifying weekly reaction detected."
+    reason: "No qualifying weekly reaction detected on the latest completed candle pair."
   };
 }
-  
+
 // =====================================
 // TWO-CANDLE SWING DETECTOR
 // =====================================
@@ -495,9 +528,9 @@ function detectDailyStructure(candles) {
           continuation_date: candle.datetime
         });
       }
-    }
+          }
 
-    // Establish a new HH when price closes above latestSwingHigh.
+      // Establish a new HH when price closes above latestSwingHigh.
     if (
       latestSwingHigh &&
       i > latestSwingHigh.index &&
@@ -668,9 +701,9 @@ app.post("/webhook", async (req, res) => {
         active ? "Monitoring resumed." : "Monitoring paused."
       );
       return;
-    }
+          }
 
-        if (command === "/check") {
+      if (command === "/check") {
       if (!argument) {
         await sendMessage(chatId, "Example: /check GBPUSD");
         return;
@@ -752,8 +785,8 @@ app.post("/webhook", async (req, res) => {
 
       await sendMessage(chatId, report);
       return;
-        }
-    
+    }
+
     if (command === "/weekly") {
       const now = new Date();
       const watOffset = 60 * 60 * 1000;
@@ -851,9 +884,9 @@ app.get("/test-w1-av", async (req, res) => {
   try {
     const symbol = normalizeSymbol(req.query.symbol);
 
-const raw = await getMarketCandles(symbol, "1week", 100);
-const filtered = filterCompletedWeeklyCandles(raw);
-const candles = filtered.candles;
+    const raw = await getMarketCandles(symbol, "1week", 100);
+    const filtered = filterCompletedWeeklyCandles(raw);
+    const candles = filtered.candles;
     const developing = filtered.developing;
 
     const formations = [];
@@ -890,14 +923,14 @@ const candles = filtered.candles;
       }
     }
 
-res.json({
-  success: true,
-  symbol,
-  timeframe: "W1",
-  status: developing.length > 0 ? "DEVELOPING" : "NO DEVELOPING CANDLE",
-  developing,
-  formations
-});
+    res.json({
+      success: true,
+      symbol,
+      timeframe: "W1",
+      status: developing.length > 0 ? "DEVELOPING" : "NO DEVELOPING CANDLE",
+      developing,
+      formations
+    });
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -915,9 +948,9 @@ app.get("/test-w1-open-close", async (req, res) => {
     const symbol = normalizeSymbol(req.query.symbol);
 
     const raw = await getMarketCandles(symbol, "1week", 100);
-const filtered = filterCompletedWeeklyCandles(raw);
-const candles = filtered.candles;
-const developing = filtered.developing;
+    const filtered = filterCompletedWeeklyCandles(raw);
+    const candles = filtered.candles;
+    const developing = filtered.developing;
 
     const formations = [];
 
@@ -963,14 +996,14 @@ const developing = filtered.developing;
       }
     }
 
-res.json({
-  success: true,
-  symbol,
-  timeframe: "W1",
-  status: developing.length > 0 ? "DEVELOPING" : "NO DEVELOPING CANDLE",
-  developing,
-  formations
-});
+    res.json({
+      success: true,
+      symbol,
+      timeframe: "W1",
+      status: developing.length > 0 ? "DEVELOPING" : "NO DEVELOPING CANDLE",
+      developing,
+      formations
+    });
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -978,8 +1011,8 @@ res.json({
     });
   }
 });
-  
-  // =====================================
+
+// =====================================
 // W1 STORYLINE TEST
 // =====================================
 
@@ -1084,7 +1117,7 @@ app.get("/test-d1-ebo", async (req, res) => {
         protected_HL: result.protectedHL
       },
 
-            events: result.events,
+      events: result.events,
 
       excluded_weekend_dates: filtered.excludedWeekend,
       excluded_unfinished_dates: filtered.excludedUnfinished,
