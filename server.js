@@ -206,6 +206,94 @@ function filterCompletedWeeklyCandles(rawCandles) {
     .map(candle => candle.datetime)
 };
 
+  // =====================================
+// W1 STORYLINE DETECTOR
+// =====================================
+
+function detectWeeklyStoryline(candles) {
+  if (!candles || candles.length < 2) {
+    return {
+      status: "INSUFFICIENT DATA",
+      bias: "NONE",
+      reason: "Not enough completed weekly candles."
+    };
+  }
+
+  const previous = candles[candles.length - 2];
+  const latest = candles[candles.length - 1];
+
+  const previousHigh = Number(previous.high);
+  const previousLow = Number(previous.low);
+
+  const latestHigh = Number(latest.high);
+  const latestLow = Number(latest.low);
+  const latestClose = Number(latest.close);
+
+  // Previous weekly high swept, then price closed below it.
+  if (
+    latestHigh > previousHigh &&
+    latestClose < previousHigh
+  ) {
+    return {
+      status: "DEVELOPING",
+      bias: "BEARISH",
+      reason: "Previous Weekly High swept and weekly candle closed below it.",
+      key_level: previousHigh,
+      reaction_date: latest.datetime
+    };
+  }
+
+  // Previous weekly low swept, then price closed above it.
+  if (
+    latestLow < previousLow &&
+    latestClose > previousLow
+  ) {
+    return {
+      status: "DEVELOPING",
+      bias: "BULLISH",
+      reason: "Previous Weekly Low swept and weekly candle closed above it.",
+      key_level: previousLow,
+      reaction_date: latest.datetime
+    };
+  }
+
+  // Two-candle A/V formation.
+  const previousColor = candleColor(previous);
+  const latestColor = candleColor(latest);
+
+  if (
+    previousColor === "BULLISH" &&
+    latestColor === "BEARISH"
+  ) {
+    return {
+      status: "DEVELOPING",
+      bias: "BEARISH",
+      reason: "Weekly A-shape formation detected.",
+      key_level: Math.max(bodyTop(previous), bodyTop(latest)),
+      reaction_date: latest.datetime
+    };
+  }
+
+  if (
+    previousColor === "BEARISH" &&
+    latestColor === "BULLISH"
+  ) {
+    return {
+      status: "DEVELOPING",
+      bias: "BULLISH",
+      reason: "Weekly V-shape formation detected.",
+      key_level: Math.min(bodyBottom(previous), bodyBottom(latest)),
+      reaction_date: latest.datetime
+    };
+  }
+
+  return {
+    status: "NO STORYLINE",
+    bias: "NONE",
+    reason: "No qualifying weekly reaction detected."
+  };
+}
+  
 // =====================================
 // TWO-CANDLE SWING DETECTOR
 // =====================================
@@ -883,6 +971,37 @@ res.json({
   developing,
   formations
 });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+  
+  // =====================================
+// W1 STORYLINE TEST
+// =====================================
+
+app.get("/test-w1-storyline", async (req, res) => {
+  try {
+    const symbol = normalizeSymbol(req.query.symbol);
+
+    const raw = await getMarketCandles(symbol, "1week", 100);
+    const filtered = filterCompletedWeeklyCandles(raw);
+    const candles = filtered.candles;
+
+    const storyline = detectWeeklyStoryline(candles);
+
+    res.json({
+      success: true,
+      symbol,
+      timeframe: "W1",
+      storyline,
+      latest_completed_candle: candles[candles.length - 1] || null,
+      developing: filtered.developing
+    });
+
   } catch (error) {
     res.status(500).json({
       success: false,
