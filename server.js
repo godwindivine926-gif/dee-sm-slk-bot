@@ -766,6 +766,7 @@ app.get("/test-w1-av", async (req, res) => {
 const raw = await getMarketCandles(symbol, "1week", 100);
 const filtered = filterCompletedWeeklyCandles(raw);
 const candles = filtered.candles;
+    const developing = filtered.developing;
 
     const formations = [];
 
