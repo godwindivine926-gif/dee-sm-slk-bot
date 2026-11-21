@@ -1957,7 +1957,7 @@ app.get("/test-h4-ebo", async (req, res) => {
     const candles = filterCompletedH4Candles(raw);
     const result = detectH4Structure(candles);
 
-    res.json({
+        res.json({
       success: true,
       symbol,
       timeframe: "H4",
@@ -1970,7 +1970,8 @@ app.get("/test-h4-ebo", async (req, res) => {
       error: error.message
     });
   }
-}};
+});
+
 
 // =====================================
 // AUTOMATIC WATCHLIST MONITOR (EVERY 30 MIN)
