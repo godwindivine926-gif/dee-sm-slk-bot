@@ -2114,8 +2114,27 @@ async function scanWatchlistOnce() {
           d1Candles.length >= 5 && h4Candles.length >= 5
             ? detectDailyToH4Ebo(d1Candles, h4Candles)
             : null;
+        const w1Storyline = w1Candles.length >= 2 ? detectWeeklyStoryline(w1Candles) : null;
+        const d1Structure = d1Candles.length >= 5 ? detectDailyStructure(d1Candles) : null;
 
-        marketCache.set(symbol, { w1ToD1, d1ToH4 });
+        const w1Bias =
+          w1Storyline && w1Storyline.bias && w1Storyline.bias !== "NONE"
+            ? w1Storyline.bias
+            : null;
+
+        const d1Bias =
+          d1Structure && d1Structure.direction && d1Structure.direction !== "UNCONFIRMED"
+            ? d1Structure.direction
+            : null;
+
+        const latestD1Date = d1Candles.length
+          ? String(d1Candles[d1Candles.length - 1].datetime).slice(0, 10)
+          : null;
+        const todayWatDate = getWatNow().toISOString().slice(0, 10);
+        const nextDayRule =
+          latestD1Date && latestD1Date < todayWatDate ? "✅" : "⏳";
+
+        marketCache.set(symbol, { w1ToD1, d1ToH4, w1Bias, d1Bias, nextDayRule });
       } catch (err) {
         console.error(`Monitor fetch error for ${symbol}:`, err.message);
       }
