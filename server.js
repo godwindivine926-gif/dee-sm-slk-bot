@@ -1585,9 +1585,10 @@ app.post("/webhook", async (req, res) => {
       return;
         }
 
-            if (command === "/check") {
-      const parts = String(text || "").trim().split(/\s+/);
-      const symbol = normalizeSymbol(parts[1] || "GBPUSD");        
+                if (command === "/check") {
+      const rawText = message?.text || req.body?.message?.text || "";
+      const parts = String(rawText).trim().split(/\s+/);
+      const symbol = normalizeSymbol(parts[1] || "GBPUSD");
       await sendMessage(chatId, `Checking <b>${symbol}</b> W1, D1 & H4 structure...`);
 
       const [rawW1, rawD1, rawH4] = await Promise.all([
