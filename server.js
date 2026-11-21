@@ -1936,7 +1936,7 @@ app.get("/test-d1-h4-ebo", async (req, res) => {
 
     const cascade = detectDailyToH4Ebo(d1Candles, h4Candles);
 
-    res.json({
+        res.json({
       success: true,
       symbol,
       cascade: "D1 -> H4",
@@ -1948,7 +1948,8 @@ app.get("/test-d1-h4-ebo", async (req, res) => {
       message: error.message
     });
   }
-});
+}});
+
 
 app.get("/test-h4-ebo", async (req, res) => {
   try {
@@ -1957,21 +1958,20 @@ app.get("/test-h4-ebo", async (req, res) => {
     const candles = filterCompletedH4Candles(raw);
     const result = detectH4Structure(candles);
 
-        res.json({
+            res.json({
       success: true,
       symbol,
-      timeframe: "H4",
-      latestCandle: candles[candles.length - 1] || null,
-      ...result
+      cascade: "D1 -> H4",
+      ...cascade
     });
-    
   } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message
+      message: error.message
     });
   }
-});
+}});
+
 
 // =====================================
 // AUTOMATIC WATCHLIST MONITOR (EVERY 30 MIN)
