@@ -1638,47 +1638,51 @@ app.post("/webhook", async (req, res) => {
           ? "🔴"
           : "⚪";
 
-                  const w1d1Block = w1d1Setup
-        ? `<b>W1 ${w1d1Setup.htf_level_type} rejection @ ${formatPrice(w1d1Setup.htf_zone.low)}</b>\n` +
+                        const w1d1Block = w1d1Setup
+        ? `Rejected at ${w1d1Setup.htf_level_type} KL @ ${formatPrice(w1d1Setup.htf_zone.low)}.\n\n` +
           (w1d1Setup.ebo
-            ? `<b>D1 EBO broke ${w1d1Setup.htf_level_type} @ ${formatPrice(w1d1Setup.ebo.broken_pullback_level)}</b>\n\n`
-            : `<i>⏳ Waiting pullback break</i>\n\n`) +
-          `<i>Cause level formed ${w1d1Setup.htf_level_formed} · tapped ${w1d1Setup.htf_contact_date}</i>` +
-          (w1d1Setup.ebo?.broken_pullback_date ? `\n<i>Breakout level formed ${w1d1Setup.ebo.broken_pullback_date}</i>` : ``)
-        : `<b>W1 > D1:</b> No active setup`;
+            ? `<b>External BO @ ${formatPrice(w1d1Setup.ebo.broken_pullback_level)}${w1d1Setup.ebo.broken_pullback_date ? ` · ${w1d1Setup.ebo.broken_pullback_date}` : ""}</b>\n`
+            : `<i>⏳ Waiting pullback break</i>\n`) +
+          `<b>Rejected on ${w1d1Setup.htf_contact_date}</b>\n` +
+          `<b>Trend ${w1Bias !== "NEUTRAL" ? `aligned with W1 (${w1Bias})` : "neutral on W1"}</b>`
+        : `W1→D1: No active setup.`;
 
       const d1h4Block = d1h4Setup
-        ? `<b>D1 ${d1h4Setup.htf_level_type} rejection @ ${formatPrice(d1h4Setup.htf_zone.low)}</b>\n` +
+        ? `Rejected at ${d1h4Setup.htf_level_type} KL @ ${formatPrice(d1h4Setup.htf_zone.low)}.\n\n` +
           (d1h4Setup.ebo
-            ? `<b>H4 EBO broke ${d1h4Setup.htf_level_type} @ ${formatPrice(d1h4Setup.ebo.broken_pullback_level)}</b>\n\n`
-            : `<i>⏳ Waiting pullback break</i>\n\n`) +
-          `<i>Cause level formed ${d1h4Setup.htf_level_formed} · tapped ${d1h4Setup.htf_contact_date}</i>` +
-          (d1h4Setup.ebo?.broken_pullback_date ? `\n<i>Breakout level formed ${d1h4Setup.ebo.broken_pullback_date}</i>` : ``)
-        : `<b>D1 > H4:</b> No active setup`;
+            ? `<b>External BO @ ${formatPrice(d1h4Setup.ebo.broken_pullback_level)}${d1h4Setup.ebo.broken_pullback_date ? ` · ${d1h4Setup.ebo.broken_pullback_date}` : ""}</b>\n`
+            : `<i>⏳ Waiting pullback break</i>\n`) +
+          `<b>Rejected on ${d1h4Setup.htf_contact_date}</b>\n` +
+          `<b>Trend ${d1Bias !== "NEUTRAL" ? `aligned with D1 (${d1Bias})` : "neutral on D1"}</b>`
+        : `D1→H4: No active setup.`;
 
-      const alignmentText =
+      const dirLabel =
+        badge === "🔴"
+          ? "🚨 <b>SELL"
+          : badge === "🟢"
+          ? "🟢 <b>BUY"
+          : `${badge} <b>${symbol}`;
+
+      const legPair = d1h4Setup?.ebo ? "D1→H4" : "W1→D1";
+      const activeBody = d1h4Setup?.ebo ? d1h4Block : w1d1Block;
+      const hasConfirmedBo = Boolean(d1h4Setup?.ebo || w1d1Setup?.ebo);
+
+      const alignmentNote =
         w1Bias !== "NEUTRAL" && d1Bias !== "NEUTRAL"
-          ? `<b>W1 ${w1Bias} · D1 ${d1Bias} — ${w1Bias === d1Bias ? "W/D ALIGNED · CONTINUATION" : "W/D CONFLICTING · REVERSAL"}</b>`
-          : `<b>W1 ${w1Bias} · D1 ${d1Bias}</b>`;
-
-      const storylineTitle =
-        badge === "🟢"
-          ? "🟢 <b>BULLISH STORYLINE CONFIRMED —</b>"
-          : badge === "🔴"
-          ? "🔴 <b>BEARISH STORYLINE CONFIRMED —</b>"
-          : `${badge} <b>${symbol} — MARKET READ</b>`;
-
-      const activeLegTitle = d1h4Setup?.ebo ? `${symbol} · D1 > H4` : `${symbol} · W1 > D1`;
+          ? w1Bias === d1Bias
+            ? `Weekly BO aligned in the same direction as the Daily BO`
+            : `⚠️ Weekly is ${w1Bias.toLowerCase()} BUT in its reversal phase`
+          : "";
 
       const msg =
-        `${storylineTitle}\n` +
-        `<b>${activeLegTitle}</b>\n\n` +
-        `${d1h4Setup?.ebo ? d1h4Block : w1d1Block}\n\n` +
-        `${alignmentText}\n` +
-        `<i>NEXT DAY RULE: ${nextDayRule}</i>\n` +
-        `Sent ${formatWatTimestamp()}\n\n` +
-        `Not an entry signal — bias context only.`;
-                  
+        `${dirLabel} · ${symbol} · ${legPair}</b>\n` +
+        `${hasConfirmedBo ? "External breakout confirmed" : "Structure monitoring"}\n\n` +
+        `${activeBody}\n` +
+        (alignmentNote ? `${alignmentNote}\n\n` : `\n`) +
+        `All times shown are candle open times.\n\n` +
+        `⚠️ Not an entry signal. Bias only — wait for your entry model.\n\n` +
+        `Sent ${formatWatTimestamp()}`;
+                              
       await sendMessage(chatId, msg, buildStorylineInlineKeyboard(symbol));
       return;
         }
