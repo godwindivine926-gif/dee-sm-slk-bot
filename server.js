@@ -559,44 +559,39 @@ function trackDailyKeyLevels(candles, levels) {
       const high = Number(candle.high);
       const low = Number(candle.low);
 
-      // Check whether the level has been invalidated.
-      if (
+      const touched =
+        high >= level.low && low <= level.high;
+
+      // Check for invalidation.
+      const invalidated =
         (level.bias === "BEARISH" && close > level.high) ||
-        (level.bias === "BULLISH" && close < level.low)
-      ) {
+        (level.bias === "BULLISH" && close < level.low);
+
+      if (invalidated) {
         status = "INVALIDATED";
         invalidation = {
           date: candle.datetime,
           close
         };
-        break;
+        reaction = null;
+        continue;
       }
 
-      // Check for a confirmed reaction.
-      const touched =
-        high >= level.low && low <= level.high;
+      // Check for confirmed reaction.
+      if (touched) {
+        const bearishReaction =
+          level.bias === "BEARISH" && close < level.low;
 
-      if (!reaction && touched) {
-        if (
-          level.bias === "BEARISH" &&
-          close < level.low
-        ) {
+        const bullishReaction =
+          level.bias === "BULLISH" && close > level.high;
+
+        if (bearishReaction || bullishReaction) {
+          status = "REACTED";
           reaction = {
             date: candle.datetime,
             close
           };
-          status = "REACTED";
-        }
-
-        if (
-          level.bias === "BULLISH" &&
-          close > level.high
-        ) {
-          reaction = {
-            date: candle.datetime,
-            close
-          };
-          status = "REACTED";
+          invalidation = null;
         }
       }
     }
