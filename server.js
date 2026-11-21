@@ -1476,11 +1476,23 @@ app.post("/webhook", async (req, res) => {
     const command = parts[0].split("@")[0].toLowerCase();
     const argument = parts[1];
 
-    if (command === "/start") {
+        if (command === "/start") {
       await sendMessage(
         chatId,
-        `<b>DEE SM SLK BOT</b>\n\n` +
-          `/help - View commands\n` +
+        `<b>Welcome to DEE SM SLK BOT! 📊</b>\n\n` +
+          `Your personal market monitoring assistant.\n\n` +
+          `Structure | Liquidity | Key Levels\n\n` +
+          `<b>BIAS ≠ ENTRY.</b>\n` +
+          `This bot provides market context, not entry signals.\n\n` +
+          `Type /help to see available commands.`
+      );
+      return;
+        }
+    
+        if (command === "/help") {
+      await sendMessage(
+        chatId,
+        `<b>BOT COMMANDS</b>\n\n` +
           `/add GBPUSD - Add pair\n` +
           `/remove GBPUSD - Remove pair\n` +
           `/watchlist - View pairs\n` +
@@ -1490,23 +1502,8 @@ app.post("/webhook", async (req, res) => {
           `/weekly - Previous week's events`
       );
       return;
-    }
-
-    if (command === "/help") {
-      await sendMessage(
-        chatId,
-        `<b>BOT COMMANDS</b>\n\n` +
-          `/add GBPUSD\n` +
-          `/remove GBPUSD\n` +
-          `/watchlist\n` +
-          `/check GBPUSD\n` +
-          `/pause\n` +
-          `/resume\n` +
-          `/weekly`
-      );
-      return;
-    }
-
+        }
+    
         if (command === "/add") {
       if (!argument) {
         await sendMessage(chatId, "Example: /add GBPUSD");
