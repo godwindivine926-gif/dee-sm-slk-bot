@@ -822,7 +822,8 @@ app.get("/test-w1-open-close", async (req, res) => {
     const symbol = normalizeSymbol(req.query.symbol);
 
     const raw = await getMarketCandles(symbol, "1week", 100);
-    const candles = raw.slice(1).reverse();
+const filtered = filterCompletedWeeklyCandles(raw);
+const candles = filtered.candles;
 
     const formations = [];
 
