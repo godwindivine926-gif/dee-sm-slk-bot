@@ -400,13 +400,14 @@ function detectDailyStructure(candles) {
   let protectedLH = null;
   let protectedHL = null;
 
+  let direction = "UNCONFIRMED";
+
   const events = [];
 
   for (let i = 0; i < candles.length; i++) {
     const candle = candles[i];
     const close = Number(candle.close);
 
-    // 1. Register swing formations completed on this candle.
     const formedSwings = swings.filter(
       swing => swing.index === i
     );
@@ -415,7 +416,7 @@ function detectDailyStructure(candles) {
       if (swing.type === "SWING_HIGH") {
         latestSwingHigh = swing;
 
-        if (bearishLL && i > bearishLL.index && !protectedLH) {
+        if (direction === "BEARISH" && bearishLL) {
           pendingLH = swing;
         }
       }
@@ -423,31 +424,16 @@ function detectDailyStructure(candles) {
       if (swing.type === "SWING_LOW") {
         latestSwingLow = swing;
 
-        if (bullishHH && i > bullishHH.index && !protectedHL) {
+        if (direction === "BULLISH" && bullishHH) {
           pendingHL = swing;
         }
       }
     }
 
-    // 2. Check for Bullish EBO (body close above protected LH).
-    if (
-      protectedLH &&
-      i > protectedLH.index &&
-      close > protectedLH.level
-    ) {
-      events.push({
-        type: "BULLISH_EBO",
-        date: candle.datetime,
-        close,
-        broken_level: protectedLH.level,
-        protected_lh_date: protectedLH.date
-      });
+    // =====================================
+    // BEARISH EBO
+    // =====================================
 
-      protectedLH = null;
-      pendingLH = null;
-    }
-
-    // 3. Check for Bearish EBO (body close below protected HL).
     if (
       protectedHL &&
       i > protectedHL.index &&
@@ -465,33 +451,93 @@ function detectDailyStructure(candles) {
       pendingHL = null;
     }
 
-    // 4. BEARISH STRUCTURE: Confirm protected LH.
-    if (bearishLL && pendingLH && i > pendingLH.index) {
-      if (close < bearishLL.level) {
-        protectedLH = {
-          date: pendingLH.date,
-          index: pendingLH.index,
-          level: pendingLH.level,
-          confirmation_date: candle.datetime
-        };
+    // =====================================
+    // BULLISH EBO
+    // =====================================
 
-        pendingLH = null;
+    if (
+      protectedLH &&
+      i > protectedLH.index &&
+      close > protectedLH.level
+    ) {
+      events.push({
+        type: "BULLISH_EBO",
+        date: candle.datetime,
+        close,
+        broken_level: protectedLH.level,
+        protected_lh_date: protectedLH.date
+      });
 
-        events.push({
-          type: "PROTECTED_LH_CONFIRMED",
-          date: protectedLH.date,
-          level: protectedLH.level,
-          continuation_date: candle.datetime
-        });
-      }
+      protectedLH = null;
+      pendingLH = null;
     }
 
-    // Establish a new LL when price closes below latestSwingLow.
+    // =====================================
+    // BEARISH STRUCTURE
+    // =====================================
+
+    if (
+      direction === "BEARISH" &&
+      bearishLL &&
+      pendingLH &&
+      i > pendingLH.index &&
+      close < bearishLL.level
+    ) {
+      protectedLH = {
+        date: pendingLH.date,
+        index: pendingLH.index,
+        level: pendingLH.level,
+        confirmation_date: candle.datetime
+      };
+
+      pendingLH = null;
+
+      events.push({
+        type: "PROTECTED_LH_CONFIRMED",
+        date: protectedLH.date,
+        level: protectedLH.level,
+        continuation_date: candle.datetime
+      });
+    }
+
+    // =====================================
+    // BULLISH STRUCTURE
+    // =====================================
+
+    if (
+      direction === "BULLISH" &&
+      bullishHH &&
+      pendingHL &&
+      i > pendingHL.index &&
+      close > bullishHH.level
+    ) {
+      protectedHL = {
+        date: pendingHL.date,
+        index: pendingHL.index,
+        level: pendingHL.level,
+        confirmation_date: candle.datetime
+      };
+
+      pendingHL = null;
+
+      events.push({
+        type: "PROTECTED_HL_CONFIRMED",
+        date: protectedHL.date,
+        level: protectedHL.level,
+        continuation_date: candle.datetime
+      });
+    }
+
+    // =====================================
+    // CONFIRM NEW LL
+    // =====================================
+
     if (
       latestSwingLow &&
       i > latestSwingLow.index &&
       close < latestSwingLow.level &&
-      (!bearishLL || bearishLL.broken_swing_low !== latestSwingLow.level)
+      (!bearishLL ||
+        bearishLL.broken_swing_low !== latestSwingLow.level)
     ) {
       bearishLL = {
         date: candle.datetime,
@@ -499,7 +545,17 @@ function detectDailyStructure(candles) {
         level: bodyBottom(candle),
         broken_swing_low: latestSwingLow.level
       };
+
+      direction = "BEARISH";
+
+      // Invalidate the previous bullish structure.
+      bullishHH = null;
       pendingHL = null;
+      protectedHL = null;
+
+      // A new LL requires a fresh LH formation.
+      pendingLH = null;
+      protectedLH = null;
 
       events.push({
         type: "LL_CONFIRMED",
@@ -509,33 +565,16 @@ function detectDailyStructure(candles) {
       });
     }
 
-    // 5. BULLISH STRUCTURE: Confirm protected HL.
-    if (bullishHH && pendingHL && i > pendingHL.index) {
-      if (close > bullishHH.level) {
-        protectedHL = {
-          date: pendingHL.date,
-          index: pendingHL.index,
-          level: pendingHL.level,
-          confirmation_date: candle.datetime
-        };
+    // =====================================
+    // CONFIRM NEW HH
+    // =====================================
 
-        pendingHL = null;
-
-        events.push({
-          type: "PROTECTED_HL_CONFIRMED",
-          date: protectedHL.date,
-          level: protectedHL.level,
-          continuation_date: candle.datetime
-        });
-      }
-          }
-
-      // Establish a new HH when price closes above latestSwingHigh.
     if (
       latestSwingHigh &&
       i > latestSwingHigh.index &&
       close > latestSwingHigh.level &&
-      (!bullishHH || bullishHH.broken_swing_high !== latestSwingHigh.level)
+      (!bullishHH ||
+        bullishHH.broken_swing_high !== latestSwingHigh.level)
     ) {
       bullishHH = {
         date: candle.datetime,
@@ -543,7 +582,17 @@ function detectDailyStructure(candles) {
         level: bodyTop(candle),
         broken_swing_high: latestSwingHigh.level
       };
+
+      direction = "BULLISH";
+
+      // Invalidate the previous bearish structure.
+      bearishLL = null;
       pendingLH = null;
+      protectedLH = null;
+
+      // A new HH requires a fresh HL formation.
+      pendingHL = null;
+      protectedHL = null;
 
       events.push({
         type: "HH_CONFIRMED",
@@ -555,6 +604,7 @@ function detectDailyStructure(candles) {
   }
 
   return {
+    direction,
     latestSwingHigh,
     latestSwingLow,
     bearishLL,
@@ -566,7 +616,7 @@ function detectDailyStructure(candles) {
     swings,
     events
   };
-}
+        }
 
 // =====================================
 // HOME
