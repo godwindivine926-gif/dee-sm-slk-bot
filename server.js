@@ -164,6 +164,13 @@ function formatPrice(value) {
   return Number(value).toString();
 }
 
+function toTimestampMs(datetimeStr, endOfDay = false) {
+  const raw = String(datetimeStr).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return Date.parse(endOfDay ? `${raw}T23:59:59Z` : `${raw}T00:00:00Z`);
+  }
+  return Date.parse(raw.includes("T") ? raw : `${raw.replace(" ", "T")}Z`);
+      }
 // =====================================
 // MARKET DATA VALIDATION
 // =====================================
@@ -245,12 +252,11 @@ function filterCompletedH4Candles(rawCandles) {
     .filter(isValidOhlcCandle)
     .sort((a, b) => a.datetime.localeCompare(b.datetime));
 
-  // Exclude the latest potentially developing candle
   return valid.length > 1 ? valid.slice(0, -1) : valid;
 }
 
 // =====================================
-// W1 STORYLINE DETECTOR
+// W1 STORYLINE & WEEKLY KEY LEVELS
 // =====================================
 
 function detectWeeklyStoryline(candles) {
@@ -370,6 +376,104 @@ function detectWeeklyStoryline(candles) {
   };
 }
 
+function detectWeeklyKeyLevels(w1Candles) {
+  const levels = [];
+
+  for (let i = 1; i < w1Candles.length; i++) {
+    const first = w1Candles[i - 1];
+    const second = w1Candles[i];
+
+    const firstColor = candleColor(first);
+    const secondColor = candleColor(second);
+
+    // Weekly A-SHAPE (Bearish reversal level)
+    if (firstColor === "BULLISH" && secondColor === "BEARISH") {
+      levels.push({
+        type: "A-SHAPE",
+        bias: "BEARISH",
+        first_candle: first.datetime,
+        second_candle: second.datetime,
+        formation_index: i,
+        low: Math.min(bodyTop(first), bodyTop(second)),
+        high: Math.max(bodyTop(first), bodyTop(second))
+      });
+    }
+
+    // Weekly V-SHAPE (Bullish reversal level)
+    if (firstColor === "BEARISH" && secondColor === "BULLISH") {
+      levels.push({
+        type: "V-SHAPE",
+        bias: "BULLISH",
+        first_candle: first.datetime,
+        second_candle: second.datetime,
+        formation_index: i,
+        low: Math.min(bodyBottom(first), bodyBottom(second)),
+        high: Math.max(bodyBottom(first), bodyBottom(second))
+      });
+    }
+
+    // Weekly OPEN/CLOSE gap
+    if (firstColor === secondColor && firstColor !== "DOJI") {
+      const firstClose = Number(first.close);
+      const secondOpen = Number(second.open);
+
+      if (firstClose !== secondOpen) {
+        levels.push({
+          type: "OPEN-CLOSE",
+          bias: firstColor === "BULLISH" ? "BULLISH" : "BEARISH",
+          first_candle: first.datetime,
+          second_candle: second.datetime,
+          formation_index: i,
+          low: Math.min(firstClose, secondOpen),
+          high: Math.max(firstClose, secondOpen)
+        });
+      }
+    }
+  }
+
+  return levels;
+}
+
+function detectWeeklyKeyLevelContacts(w1Candles, w1Levels) {
+  const contacts = [];
+
+  for (const level of w1Levels) {
+    for (let i = level.formation_index + 1; i < w1Candles.length; i++) {
+      const candle = w1Candles[i];
+      const high = Number(candle.high);
+      const low = Number(candle.low);
+      const close = Number(candle.close);
+
+      // Invalidated before reacting
+      if (
+        (level.bias === "BEARISH" && close > level.high) ||
+        (level.bias === "BULLISH" && close < level.low)
+      ) {
+        break;
+      }
+
+      // Weekly candle tapped into the weekly key level
+      if (high >= level.low && low <= level.high) {
+        contacts.push({
+          type:
+            level.bias === "BEARISH"
+              ? "BEARISH_WEEKLY_KEY_LEVEL_CONTACT"
+              : "BULLISH_WEEKLY_KEY_LEVEL_CONTACT",
+          bias: level.bias,
+          level_type: level.type,
+          level_formed: level.second_candle,
+          contact_date: candle.datetime,
+          level_low: level.low,
+          level_high: level.high
+        });
+        break;
+      }
+    }
+  }
+
+  return contacts.sort((a, b) => a.contact_date.localeCompare(b.contact_date));
+      }
+
 // =====================================
 // TWO-CANDLE SWING DETECTOR
 // =====================================
@@ -411,7 +515,7 @@ function identifySwings(candles) {
 }
 
 // =====================================
-// DAILY KEY-LEVEL DETECTOR
+// DAILY KEY-LEVEL DETECTOR & TRACKER
 // =====================================
 
 function detectDailyKeyLevels(candles) {
@@ -424,7 +528,6 @@ function detectDailyKeyLevels(candles) {
     const firstColor = candleColor(first);
     const secondColor = candleColor(second);
 
-    // A-SHAPE: Bullish followed by bearish.
     if (firstColor === "BULLISH" && secondColor === "BEARISH") {
       levels.push({
         type: "A-SHAPE",
@@ -438,7 +541,6 @@ function detectDailyKeyLevels(candles) {
       });
     }
 
-    // V-SHAPE: Bearish followed by bullish.
     if (firstColor === "BEARISH" && secondColor === "BULLISH") {
       levels.push({
         type: "V-SHAPE",
@@ -452,7 +554,6 @@ function detectDailyKeyLevels(candles) {
       });
     }
 
-    // OPEN/CLOSE: Two consecutive candles of the same colour.
     if (firstColor === secondColor && firstColor !== "DOJI") {
       const firstClose = Number(first.close);
       const secondOpen = Number(second.open);
@@ -474,10 +575,6 @@ function detectDailyKeyLevels(candles) {
 
   return levels;
 }
-
-// =====================================
-// DAILY KEY-LEVEL REACTION DETECTOR
-// =====================================
 
 function detectDailyKeyLevelReactions(candles, levels) {
   const reactions = [];
@@ -517,17 +614,12 @@ function detectDailyKeyLevelReactions(candles, levels) {
         });
       }
 
-      // First confirmed reaction for this level.
       break;
     }
   }
 
   return reactions.sort((a, b) => b.date.localeCompare(a.date));
 }
-
-// =====================================
-// DAILY KEY-LEVEL STATUS TRACKER
-// =====================================
 
 function trackDailyKeyLevels(candles, levels) {
   return levels.map(level => {
@@ -580,7 +672,7 @@ function trackDailyKeyLevels(candles, levels) {
 }
 
 // =====================================
-// REBUILT D1 STRUCTURE DETECTOR
+// D1 STRUCTURE DETECTOR
 // =====================================
 
 function detectDailyStructure(candles) {
@@ -617,7 +709,6 @@ function detectDailyStructure(candles) {
     const high = Number(candle.high);
     const low = Number(candle.low);
 
-    // BULLISH DAILY KEY-LEVEL CONTACT
     if (direction === "BULLISH" && !bullishKeyLevelReached) {
       const touchedLevel = keyLevels
         .filter(
@@ -647,7 +738,6 @@ function detectDailyStructure(candles) {
       }
     }
 
-    // BEARISH DAILY KEY-LEVEL CONTACT
     if (direction === "BEARISH" && !bearishKeyLevelReached) {
       const touchedLevel = keyLevels
         .filter(
@@ -677,7 +767,6 @@ function detectDailyStructure(candles) {
       }
     }
 
-    // IDENTIFY NEW SWINGS FORMED ON THIS CANDLE
     const formedSwings = swings.filter(swing => swing.index === i);
 
     for (const swing of formedSwings) {
@@ -696,7 +785,6 @@ function detectDailyStructure(candles) {
       }
     }
 
-    // BEARISH EBO
     if (
       bearishKeyLevelReached &&
       bearishKeyLevelContact?.protected_lh &&
@@ -719,7 +807,6 @@ function detectDailyStructure(candles) {
       pendingHL = null;
     }
 
-    // BULLISH EBO
     if (
       bullishKeyLevelReached &&
       bullishKeyLevelContact?.protected_hl &&
@@ -742,8 +829,7 @@ function detectDailyStructure(candles) {
       pendingLH = null;
     }
 
-    // CONFIRM PROTECTED LH (only before bearish key-level contact)
-     if (
+    if (
       direction === "BEARISH" &&
       !bearishKeyLevelReached &&
       bearishLL &&
@@ -883,11 +969,11 @@ function detectDailyStructure(candles) {
         }
 
 // =====================================
-// H4 STRUCTURE AND EBO DETECTOR
+// STANDALONE H4 STRUCTURE & EBO DETECTOR
 // =====================================
 
-function detectH4Structure(candles) {
-  const swings = identifySwings(candles);
+function detectH4Structure(h4Candles) {
+  const swings = identifySwings(h4Candles);
 
   let latestSwingHigh = null;
   let latestSwingLow = null;
@@ -905,17 +991,18 @@ function detectH4Structure(candles) {
 
   const events = [];
 
-  for (let i = 0; i < candles.length; i++) {
-    const candle = candles[i];
+  for (let i = 0; i < h4Candles.length; i++) {
+    const candle = h4Candles[i];
     const close = Number(candle.close);
 
-    // 1. Check EBO using completed candle-body close only (no wicks)
+    // 1. H4 EBO check using completed H4 candle-body close only (no wicks)
     if (
       protectedLH &&
       i > protectedLH.index &&
       close > protectedLH.level
     ) {
       events.push({
+        timeframe: "H4",
         type: "BULLISH_EBO",
         date: candle.datetime,
         close,
@@ -933,6 +1020,7 @@ function detectH4Structure(candles) {
       close < protectedHL.level
     ) {
       events.push({
+        timeframe: "H4",
         type: "BEARISH_EBO",
         date: candle.datetime,
         close,
@@ -944,9 +1032,7 @@ function detectH4Structure(candles) {
       pendingHL = null;
     }
 
-    // 2. Confirm new LL (candle-body close below previous swing low)
-    // A pending LH formed during bearish structure becomes protected LH;
-    // an already-confirmed protected LH is retained unless broken by body close.
+    // 2. Confirm H4 LL (body close below previous H4 swing low)
     if (
       latestSwingLow &&
       i > latestSwingLow.index &&
@@ -961,6 +1047,7 @@ function detectH4Structure(candles) {
         pendingLH = null;
 
         events.push({
+          timeframe: "H4",
           type: "PROTECTED_LH_CONFIRMED",
           date: protectedLH.date,
           level: protectedLH.level,
@@ -980,6 +1067,7 @@ function detectH4Structure(candles) {
       pendingHL = null;
 
       events.push({
+        timeframe: "H4",
         type: "LL_CONFIRMED",
         date: candle.datetime,
         level: bearishLL.level,
@@ -987,9 +1075,7 @@ function detectH4Structure(candles) {
       });
     }
 
-    // 3. Confirm new HH (candle-body close above previous swing high)
-    // A pending HL formed during bullish structure becomes protected HL;
-    // an already-confirmed protected HL is retained unless broken by body close.
+    // 3. Confirm H4 HH (body close above previous H4 swing high)
     if (
       latestSwingHigh &&
       i > latestSwingHigh.index &&
@@ -1004,6 +1090,7 @@ function detectH4Structure(candles) {
         pendingHL = null;
 
         events.push({
+          timeframe: "H4",
           type: "PROTECTED_HL_CONFIRMED",
           date: protectedHL.date,
           level: protectedHL.level,
@@ -1023,6 +1110,7 @@ function detectH4Structure(candles) {
       pendingLH = null;
 
       events.push({
+        timeframe: "H4",
         type: "HH_CONFIRMED",
         date: candle.datetime,
         level: bullishHH.level,
@@ -1030,8 +1118,7 @@ function detectH4Structure(candles) {
       });
     }
 
-    // 4. Register swings formed on this candle
-    // New swings become pendingLH / pendingHL without replacing protected swings.
+    // 4. Register new H4 swings without overwriting protected H4 swings
     const formedSwings = swings.filter(swing => swing.index === i);
 
     for (const swing of formedSwings) {
@@ -1052,6 +1139,7 @@ function detectH4Structure(candles) {
   }
 
   return {
+    timeframe: "H4",
     direction,
     latestSwingHigh,
     latestSwingLow,
@@ -1063,7 +1151,189 @@ function detectH4Structure(candles) {
     protectedLH,
     events
   };
+}
+
+// =====================================
+// MULTI-TIMEFRAME PULLBACK-BREAK EBO ENGINE
+// (W1 -> D1 and D1 -> H4)
+// =====================================
+
+function detectLowerTimeframePullbackBreak({
+  higherTimeframe,
+  lowerTimeframe,
+  contactEvent,
+  lowerCandles
+}) {
+  const lowerSwings = identifySwings(lowerCandles);
+  const contactCutoffMs = toTimestampMs(contactEvent.contact_date, true);
+
+  // Price pushed UP into a BEARISH higher-timeframe key level -> look for last pullback LOW before tap
+  // Price pushed DOWN into a BULLISH higher-timeframe key level -> look for last pullback HIGH before tap
+  const requiredPullbackType =
+    contactEvent.bias === "BEARISH" ? "SWING_LOW" : "SWING_HIGH";
+
+  const candidatePullbacks = lowerSwings.filter(
+    swing =>
+      swing.type === requiredPullbackType &&
+      toTimestampMs(swing.date, false) <= contactCutoffMs
+  );
+
+  if (!candidatePullbacks.length) {
+    return {
+      higher_timeframe: higherTimeframe,
+      lower_timeframe: lowerTimeframe,
+      htf_bias: contactEvent.bias,
+      htf_level_type: contactEvent.level_type,
+      htf_level_formed: contactEvent.level_formed,
+      htf_contact_date: contactEvent.contact_date,
+      htf_zone: {
+        low: contactEvent.level_low,
+        high: contactEvent.level_high
+      },
+      status: "NO_PULLBACK_FOUND",
+      pullback: null,
+      ebo: null
+    };
+  }
+
+  const lastPullback = candidatePullbacks[candidatePullbacks.length - 1];
+
+  // Look for candle-body close invalidating that pullback at or after the HTF tap
+  let confirmedEbo = null;
+
+  for (let i = lastPullback.index + 1; i < lowerCandles.length; i++) {
+    const candle = lowerCandles[i];
+    const close = Number(candle.close);
+
+    if (contactEvent.bias === "BEARISH" && close < lastPullback.level) {
+      confirmedEbo = {
+        type: `BEARISH_${lowerTimeframe}_EBO`,
+        date: candle.datetime,
+        close,
+        broken_pullback_level: lastPullback.level,
+        pullback_date: lastPullback.date
+      };
+      break;
     }
+
+    if (contactEvent.bias === "BULLISH" && close > lastPullback.level) {
+      confirmedEbo = {
+        type: `BULLISH_${lowerTimeframe}_EBO`,
+        date: candle.datetime,
+        close,
+        broken_pullback_level: lastPullback.level,
+        pullback_date: lastPullback.date
+      };
+      break;
+    }
+  }
+
+  return {
+    higher_timeframe: higherTimeframe,
+    lower_timeframe: lowerTimeframe,
+    htf_bias: contactEvent.bias,
+    htf_level_type: contactEvent.level_type,
+    htf_level_formed: contactEvent.level_formed,
+    htf_contact_date: contactEvent.contact_date,
+    htf_zone: {
+      low: contactEvent.level_low,
+      high: contactEvent.level_high
+    },
+    status: confirmedEbo ? "EBO_CONFIRMED" : "WAITING_FOR_PULLBACK_BREAK",
+    pullback: {
+      type: lastPullback.type,
+      date: lastPullback.date,
+      level: lastPullback.level
+    },
+    ebo: confirmedEbo
+  };
+}
+
+function detectWeeklyToDailyEbo(w1Candles, d1Candles) {
+  const w1Levels = detectWeeklyKeyLevels(w1Candles);
+  const w1Contacts = detectWeeklyKeyLevelContacts(w1Candles, w1Levels);
+
+  if (!w1Contacts.length) {
+    return {
+      status: "NO_WEEKLY_KEY_LEVEL_CONTACT",
+      latest_contact: null,
+      all_setups: []
+    };
+  }
+
+  const setups = w1Contacts.map(contact =>
+    detectLowerTimeframePullbackBreak({
+      higherTimeframe: "W1",
+      lowerTimeframe: "D1",
+      contactEvent: contact,
+      lowerCandles: d1Candles
+    })
+  );
+
+  return {
+    status: "OK",
+    latest_setup: setups[setups.length - 1],
+    all_setups: setups
+  };
+}
+
+function detectDailyToH4Ebo(d1Candles, h4Candles) {
+  const d1Levels = detectDailyKeyLevels(d1Candles);
+  const d1Contacts = [];
+
+  for (const level of d1Levels) {
+    for (let i = level.formation_index + 1; i < d1Candles.length; i++) {
+      const candle = d1Candles[i];
+      const high = Number(candle.high);
+      const low = Number(candle.low);
+      const close = Number(candle.close);
+
+      if (
+        (level.bias === "BEARISH" && close > level.high) ||
+        (level.bias === "BULLISH" && close < level.low)
+      ) {
+        break;
+      }
+
+      if (high >= level.low && low <= level.high) {
+        d1Contacts.push({
+          bias: level.bias,
+          level_type: level.type,
+          level_formed: level.second_candle,
+          contact_date: candle.datetime,
+          level_low: level.low,
+          level_high: level.high
+        });
+        break;
+      }
+    }
+  }
+
+  d1Contacts.sort((a, b) => a.contact_date.localeCompare(b.contact_date));
+
+  if (!d1Contacts.length) {
+    return {
+      status: "NO_DAILY_KEY_LEVEL_CONTACT",
+      latest_setup: null,
+      all_setups: []
+    };
+  }
+
+  const setups = d1Contacts.map(contact =>
+    detectLowerTimeframePullbackBreak({
+      higherTimeframe: "D1",
+      lowerTimeframe: "H4",
+      contactEvent: contact,
+      lowerCandles: h4Candles
+    })
+  );
+
+  return {
+    status: "OK",
+    latest_setup: setups[setups.length - 1],
+    all_setups: setups
+  };
+      }
 
 // =====================================
 // HOME & TELEGRAM WEBHOOK (PART 1)
@@ -1096,7 +1366,7 @@ app.post("/webhook", async (req, res) => {
           `/add GBPUSD - Add pair\n` +
           `/remove GBPUSD - Remove pair\n` +
           `/watchlist - View pairs\n` +
-          `/check GBPUSD - Check pair\n` +
+          `/check GBPUSD - Check W1/D1/H4 & EBOs\n` +
           `/pause - Pause monitoring\n` +
           `/resume - Resume monitoring\n` +
           `/weekly - Previous week's events`
@@ -1195,9 +1465,8 @@ app.post("/webhook", async (req, res) => {
         active ? "Monitoring resumed." : "Monitoring paused."
       );
       return;
-        }
-
-      if (command === "/check") {
+}
+          if (command === "/check") {
       if (!argument) {
         await sendMessage(chatId, "Example: /check GBPUSD");
         return;
@@ -1214,18 +1483,54 @@ app.post("/webhook", async (req, res) => {
       activeChecks.add(lockKey);
 
       try {
-        await sendMessage(chatId, `Checking ${symbol} D1 structure...`);
+        await sendMessage(chatId, `Checking ${symbol} W1, D1 & H4 structure...`);
 
-        const raw = await getMarketCandles(symbol, "1day", 150);
-        const filtered = filterCompletedDailyCandles(raw);
-        const candles = filtered.candles;
+        const [rawW1, rawD1, rawH4] = await Promise.all([
+          getMarketCandles(symbol, "1week", 100),
+          getMarketCandles(symbol, "1day", 150),
+          getMarketCandles(symbol, "4h", 150)
+        ]);
 
-        if (candles.length < 5) {
+        const w1Candles = filterCompletedWeeklyCandles(rawW1).candles;
+        const d1Candles = filterCompletedDailyCandles(rawD1).candles;
+        const h4Candles = filterCompletedH4Candles(rawH4);
+
+        if (d1Candles.length < 5) {
           await sendMessage(chatId, "Not enough completed D1 candles.");
           return;
         }
 
-        const result = detectDailyStructure(candles);
+        const result = detectDailyStructure(d1Candles);
+        const h4Result = h4Candles.length >= 5 ? detectH4Structure(h4Candles) : null;
+        const w1ToD1 = w1Candles.length >= 3 ? detectWeeklyToDailyEbo(w1Candles, d1Candles) : null;
+        const d1ToH4 = h4Candles.length >= 5 ? detectDailyToH4Ebo(d1Candles, h4Candles) : null;
+
+        const describeSwing = swing =>
+          swing ? `${swing.date} | Level: ${formatPrice(swing.level)}` : "Not formed";
+
+        const describeStructure = (item, label) =>
+          item
+            ? `${label}: ${item.date} | Body level: ${formatPrice(item.level)}`
+            : `${label}: Not confirmed`;
+
+        const formatCascadeSetup = (title, cascadeResult) => {
+          const setup = cascadeResult?.latest_setup;
+          if (!setup) {
+            return `<b>${title}</b>\nNo key-level contact detected.\n\n`;
+          }
+          const pullbackLine = setup.pullback
+            ? `Last Pullback: ${setup.pullback.date} | Level: ${formatPrice(setup.pullback.level)}`
+            : "Last Pullback: None found";
+          const eboLine = setup.ebo
+            ? `✅ ${setup.ebo.type} — ${setup.ebo.date} (Close: ${formatPrice(setup.ebo.close)})`
+            : `⏳ Status: ${setup.status}`;
+          return (
+            `<b>${title}</b>\n` +
+            `HTF Level: ${setup.htf_level_type} (${setup.htf_bias}) | Tap: ${setup.htf_contact_date}\n` +
+            `${pullbackLine}\n` +
+            `${eboLine}\n\n`
+          );
+        };
 
         const keyLevelSummary = {
           active: result.trackedKeyLevels.filter(level => level.status === "ACTIVE").length,
@@ -1239,61 +1544,26 @@ app.post("/webhook", async (req, res) => {
           `🔵 Reacted: ${keyLevelSummary.reacted}\n` +
           `🔴 Invalidated: ${keyLevelSummary.invalidated}\n\n`;
 
-        const statusText = ["ACTIVE", "REACTED", "INVALIDATED"]
-          .map(status => {
-            const levels = result.trackedKeyLevels
-              .filter(level => level.status === status)
-              .slice(-5);
+        const h4EboEvents = h4Result
+          ? h4Result.events.filter(e => e.type === "BULLISH_EBO" || e.type === "BEARISH_EBO")
+          : [];
 
-            let details = "None";
+        const h4SectionText = h4Result
+          ? `<b>H4 STRUCTURE & EBO (STANDALONE)</b>\n` +
+            `Latest H4: ${h4Candles[h4Candles.length - 1].datetime} | Bias: ${h4Result.direction}\n` +
+            `H4 Protected LH: ${describeSwing(h4Result.protectedLH)}\n` +
+            `H4 Protected HL: ${describeSwing(h4Result.protectedHL)}\n` +
+            `H4 EBOs: ${
+              h4EboEvents.length
+                ? h4EboEvents
+                    .slice(-3)
+                    .map(e => `• ${e.type} — ${e.date} (Close: ${formatPrice(e.close)})`)
+                    .join("\n")
+                : "None"
+            }\n\n`
+          : "";
 
-            if (levels.length > 0) {
-              details = levels
-                .map(level => {
-                  const eventDate =
-                    status === "REACTED"
-                      ? level.reaction?.date
-                      : status === "INVALIDATED"
-                        ? level.invalidation?.date
-                        : null;
-
-                  return (
-                    `• ${level.type}\n` +
-                    `  Bias: ${level.bias} | Formed: ${level.second_candle}\n` +
-                    (eventDate ? `  ${status} DATE: ${eventDate}\n` : "") +
-                    `  Zone: ${level.low} – ${level.high}`
-                  );
-                })
-                .join("\n");
-            }
-
-            return `<b>${status} LEVELS</b>\n${details}`;
-          })
-          .join("\n\n");
-
-        const reactionText = result.keyLevelReactions.length
-          ? result.keyLevelReactions
-              .slice(0, 5)
-              .map(
-                reaction =>
-                  `• ${reaction.type} — ${reaction.date}\n` +
-                  `  Level: ${reaction.level_type} | Formed: ${reaction.level_formed}\n` +
-                  `  Close: ${reaction.close}`
-              )
-              .join("\n")
-          : "No confirmed key-level reactions.";
-
-        const latestCandle = candles[candles.length - 1];
-
-        const describeSwing = swing =>
-          swing ? `${swing.date} | Level: ${formatPrice(swing.level)}` : "Not formed";
-
-        const describeStructure = (item, label) =>
-          item
-            ? `${label}: ${item.date} | Body level: ${formatPrice(item.level)}`
-            : `${label}: Not confirmed`;
-
-        const recentEvents = result.events.slice(-10);
+        const recentEvents = result.events.slice(-8);
 
         const eventText = recentEvents.length
           ? recentEvents
@@ -1309,25 +1579,20 @@ app.post("/webhook", async (req, res) => {
               .join("\n")
           : "No confirmed structure events found.";
 
+        const latestCandle = d1Candles[d1Candles.length - 1];
+
         const report =
-          `<b>${symbol} — D1 STRUCTURE</b>\n` +
-          `Latest completed candle: ${latestCandle.datetime}\n\n` +
-          `<b>SWINGS</b>\n` +
-          `Swing High: ${describeSwing(result.latestSwingHigh)}\n` +
-          `Swing Low: ${describeSwing(result.latestSwingLow)}\n\n` +
-          `<b>BEARISH STRUCTURE</b>\n` +
-          `${describeStructure(result.bearishLL, "LL")}\n` +
-          `Pending LH: ${describeSwing(result.pendingLH)}\n` +
-          `Protected LH: ${describeSwing(result.protectedLH)}\n\n` +
-          `<b>BULLISH STRUCTURE</b>\n` +
-          `${describeStructure(result.bullishHH, "HH")}\n` +
-          `Pending HL: ${describeSwing(result.pendingHL)}\n` +
-          `Protected HL: ${describeSwing(result.protectedHL)}\n\n` +
+          `<b>${symbol} — MULTI-TIMEFRAME STRUCTURE</b>\n` +
+          `Latest completed D1: ${latestCandle.datetime}\n\n` +
+          `${formatCascadeSetup("W1 → D1 PULLBACK EBO", w1ToD1)}` +
+          `${formatCascadeSetup("D1 → H4 PULLBACK EBO", d1ToH4)}` +
+          `<b>D1 STRUCTURE</b>\n` +
+          `${describeStructure(result.bearishLL, "LL")} | Protected LH: ${describeSwing(result.protectedLH)}\n` +
+          `${describeStructure(result.bullishHH, "HH")} | Protected HL: ${describeSwing(result.protectedHL)}\n\n` +
+          `${h4SectionText}` +
           `${keyLevelSummaryText}` +
-          `<b>DAILY KEY-LEVEL STATUS</b>\n${statusText}\n\n` +
-          `<b>DAILY KEY-LEVEL REACTIONS</b>\n${reactionText}\n\n` +
-          `<b>RECENT EVENTS</b>\n${eventText}\n\n` +
-          `<i>Structure uses candle bodies. Key-level contact recognises wick or body interaction; confirmation requires a close beyond the zone.</i>`;
+          `<b>RECENT D1 EVENTS</b>\n${eventText}\n\n` +
+          `<i>Structure and EBOs require completed candle-body closes.</i>`;
 
         await sendMessage(chatId, report);
       } finally {
@@ -1383,7 +1648,7 @@ app.post("/webhook", async (req, res) => {
 });
 
 // =====================================
-// MARKET DATA & W1 TEST ENDPOINTS
+// TEST ENDPOINTS
 // =====================================
 
 app.get("/test-market-data", async (req, res) => {
@@ -1408,141 +1673,19 @@ app.get("/test-market-data", async (req, res) => {
   }
 });
 
-app.get("/test-w1-av", async (req, res) => {
-  try {
-    const symbol = normalizeSymbol(req.query.symbol);
-
-    const raw = await getMarketCandles(symbol, "1week", 100);
-    const filtered = filterCompletedWeeklyCandles(raw);
-    const { candles, developing } = filtered;
-
-    const formations = [];
-
-    for (let i = 1; i < candles.length; i++) {
-      const first = candles[i - 1];
-      const second = candles[i];
-
-      const firstColor = candleColor(first);
-      const secondColor = candleColor(second);
-
-      if (firstColor === "BULLISH" && secondColor === "BEARISH") {
-        formations.push({
-          type: "A-SHAPE",
-          first_candle: first.datetime,
-          second_candle: second.datetime,
-          zone: {
-            low: Math.min(bodyTop(first), bodyTop(second)),
-            high: Math.max(bodyTop(first), bodyTop(second))
-          }
-        });
-      }
-
-      if (firstColor === "BEARISH" && secondColor === "BULLISH") {
-        formations.push({
-          type: "V-SHAPE",
-          first_candle: first.datetime,
-          second_candle: second.datetime,
-          zone: {
-            low: Math.min(bodyBottom(first), bodyBottom(second)),
-            high: Math.max(bodyBottom(first), bodyBottom(second))
-          }
-        });
-      }
-    }
-
-    res.json({
-      success: true,
-      symbol,
-      timeframe: "W1",
-      status: developing.length > 0 ? "DEVELOPING" : "NO DEVELOPING CANDLE",
-      developing,
-      formations
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
-
-app.get("/test-w1-open-close", async (req, res) => {
-  try {
-    const symbol = normalizeSymbol(req.query.symbol);
-
-    const raw = await getMarketCandles(symbol, "1week", 100);
-    const filtered = filterCompletedWeeklyCandles(raw);
-    const { candles, developing } = filtered;
-
-    const formations = [];
-
-    for (let i = 1; i < candles.length; i++) {
-      const first = candles[i - 1];
-      const second = candles[i];
-
-      const firstColor = candleColor(first);
-      const secondColor = candleColor(second);
-
-      const firstClose = Number(first.close);
-      const secondOpen = Number(second.open);
-
-      if (firstClose === secondOpen) continue;
-
-      if (firstColor === "BULLISH" && secondColor === "BULLISH") {
-        formations.push({
-          type: "BULLISH-OPEN-CLOSE",
-          first_candle: first.datetime,
-          second_candle: second.datetime,
-          first_close: firstClose,
-          second_open: secondOpen,
-          gap: secondOpen - firstClose
-        });
-      }
-
-      if (firstColor === "BEARISH" && secondColor === "BEARISH") {
-        formations.push({
-          type: "BEARISH-OPEN-CLOSE",
-          first_candle: first.datetime,
-          second_candle: second.datetime,
-          first_close: firstClose,
-          second_open: secondOpen,
-          gap: secondOpen - firstClose
-        });
-      }
-    }
-
-    res.json({
-      success: true,
-      symbol,
-      timeframe: "W1",
-      status: developing.length > 0 ? "DEVELOPING" : "NO DEVELOPING CANDLE",
-      developing,
-      formations
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
-
 app.get("/test-w1-storyline", async (req, res) => {
   try {
     const symbol = normalizeSymbol(req.query.symbol);
-
     const raw = await getMarketCandles(symbol, "1week", 100);
     const filtered = filterCompletedWeeklyCandles(raw);
-    const candles = filtered.candles;
-
-    const storyline = detectWeeklyStoryline(candles);
+    const storyline = detectWeeklyStoryline(filtered.candles);
 
     res.json({
       success: true,
       symbol,
       timeframe: "W1",
       storyline,
-      latest_completed_candle: candles[candles.length - 1] || null,
+      latest_completed_candle: filtered.candles[filtered.candles.length - 1] || null,
       developing: filtered.developing
     });
   } catch (error) {
@@ -1553,26 +1696,25 @@ app.get("/test-w1-storyline", async (req, res) => {
   }
 });
 
-// =====================================
-// D1 & H4 TEST ENDPOINTS
-// =====================================
-
-app.get("/test-d1-candles", async (req, res) => {
+app.get("/test-w1-d1-ebo", async (req, res) => {
   try {
-    const symbol = normalizeSymbol(req.query.symbol);
+    const symbol = normalizeSymbol(req.query.symbol || "GBPUSD");
 
-    const raw = await getMarketCandles(symbol, "1day", 150);
-    const filtered = filterCompletedDailyCandles(raw);
+    const [rawW1, rawD1] = await Promise.all([
+      getMarketCandles(symbol, "1week", 100),
+      getMarketCandles(symbol, "1day", 150)
+    ]);
+
+    const w1Candles = filterCompletedWeeklyCandles(rawW1).candles;
+    const d1Candles = filterCompletedDailyCandles(rawD1).candles;
+
+    const cascade = detectWeeklyToDailyEbo(w1Candles, d1Candles);
 
     res.json({
       success: true,
       symbol,
-      timeframe: "D1",
-      raw_latest_dates: raw.slice(0, 10).map(c => c.datetime),
-      used_dates: filtered.candles.slice(-10).map(c => c.datetime),
-      excluded_weekend_dates: filtered.excludedWeekend,
-      excluded_unfinished_dates: filtered.excludedUnfinished,
-      candles: filtered.candles.slice(-10)
+      cascade: "W1 -> D1",
+      ...cascade
     });
   } catch (error) {
     res.status(500).json({
@@ -1585,7 +1727,6 @@ app.get("/test-d1-candles", async (req, res) => {
 app.get("/test-d1-ebo", async (req, res) => {
   try {
     const symbol = normalizeSymbol(req.query.symbol);
-
     const raw = await getMarketCandles(symbol, "1day", 150);
     const filtered = filterCompletedDailyCandles(raw);
     const candles = filtered.candles;
@@ -1617,41 +1758,7 @@ app.get("/test-d1-ebo", async (req, res) => {
         pending_HL: result.pendingHL,
         protected_HL: result.protectedHL
       },
-      events: result.events,
-      excluded_weekend_dates: filtered.excludedWeekend,
-      excluded_unfinished_dates: filtered.excludedUnfinished,
-      note:
-        "Swing levels use consecutive two-candle formations and candle bodies. EBO requires a completed candle body close beyond the protected swing."
-    });
-  } catch (error) {
-    console.error("D1 detector error:", error.response?.data || error.message);
-
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
-
-app.get("/test-d1-key-levels", async (req, res) => {
-  try {
-    const symbol = normalizeSymbol(req.query.symbol);
-
-    const raw = await getMarketCandles(symbol, "1day", 150);
-    const filtered = filterCompletedDailyCandles(raw);
-    const candles = filtered.candles;
-
-    const levels = detectDailyKeyLevels(candles);
-
-    res.json({
-      success: true,
-      symbol,
-      timeframe: "D1",
-      latest_completed_candle: candles[candles.length - 1]?.datetime,
-      total_levels: levels.length,
-      key_levels: levels,
-      excluded_weekend_dates: filtered.excludedWeekend,
-      excluded_unfinished_dates: filtered.excludedUnfinished
+      events: result.events
     });
   } catch (error) {
     res.status(500).json({
@@ -1661,18 +1768,25 @@ app.get("/test-d1-key-levels", async (req, res) => {
   }
 });
 
-app.get("/test-h4-candles", async (req, res) => {
+app.get("/test-d1-h4-ebo", async (req, res) => {
   try {
-    const symbol = normalizeSymbol(req.query.symbol);
+    const symbol = normalizeSymbol(req.query.symbol || "GBPUSD");
 
-    const raw = await getMarketCandles(symbol, "4h", 150);
-    const candles = filterCompletedH4Candles(raw);
+    const [rawD1, rawH4] = await Promise.all([
+      getMarketCandles(symbol, "1day", 150),
+      getMarketCandles(symbol, "4h", 150)
+    ]);
+
+    const d1Candles = filterCompletedDailyCandles(rawD1).candles;
+    const h4Candles = filterCompletedH4Candles(rawH4);
+
+    const cascade = detectDailyToH4Ebo(d1Candles, h4Candles);
 
     res.json({
       success: true,
       symbol,
-      timeframe: "H4",
-      candles: candles.slice(-10)
+      cascade: "D1 -> H4",
+      ...cascade
     });
   } catch (error) {
     res.status(500).json({
@@ -1685,10 +1799,8 @@ app.get("/test-h4-candles", async (req, res) => {
 app.get("/test-h4-ebo", async (req, res) => {
   try {
     const symbol = normalizeSymbol(req.query.symbol || "GBPUSD");
-
     const raw = await getMarketCandles(symbol, "4h", 150);
     const candles = filterCompletedH4Candles(raw);
-
     const result = detectH4Structure(candles);
 
     res.json({
@@ -1713,5 +1825,4 @@ app.get("/test-h4-ebo", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`DEE SM SLK BOT running on port ${PORT}`);
 });
-        
-          
+                                       
