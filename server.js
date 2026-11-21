@@ -2160,7 +2160,11 @@ async function scanWatchlistOnce() {
         if (shouldAlert) {
           await sendMessage(
             chatId,
-            buildCascadeAlertMessage(symbol, "W1 > D1", setup),
+                      buildCascadeAlertMessage(symbol, "W1 > D1", setup, {
+            w1Bias: data.w1Bias,
+            d1Bias: data.d1Bias,
+            nextDayRule: data.nextDayRule
+          }),
             buildStorylineInlineKeyboard(symbol)
           );
         }
@@ -2178,8 +2182,12 @@ async function scanWatchlistOnce() {
         if (shouldAlert) {
           await sendMessage(
             chatId,
-            buildCascadeAlertMessage(symbol, "D1 > H4", setup),
-            buildStorylineInlineKeyboard(symbol)
+                    buildCascadeAlertMessage(symbol, "D1 > H4", setup, {
+            w1Bias: data.w1Bias,
+            d1Bias: data.d1Bias,
+            nextDayRule: data.nextDayRule
+          }),
+             buildStorylineInlineKeyboard(symbol)
           );
         }
       }
