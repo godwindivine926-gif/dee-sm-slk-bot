@@ -161,6 +161,50 @@ function filterCompletedDailyCandles(rawCandles) {
 }
 
 // =====================================
+// COMPLETED WEEKLY CANDLE FILTER
+// =====================================
+
+function filterCompletedWeeklyCandles(rawCandles) {
+  const watNow = new Date(Date.now() + 60 * 60 * 1000);
+
+  // Forex weekly candles begin on Sunday.
+  const currentWeekStart = new Date(watNow);
+  currentWeekStart.setUTCHours(0, 0, 0, 0);
+  currentWeekStart.setUTCDate(
+    currentWeekStart.getUTCDate() - currentWeekStart.getUTCDay()
+  );
+
+  const currentWeekDate = currentWeekStart.toISOString().slice(0, 10);
+
+  const candles = rawCandles.filter(candle => {
+    if (!candle.datetime) return false;
+
+    const values = [
+      Number(candle.open),
+      Number(candle.high),
+      Number(candle.low),
+      Number(candle.close)
+    ];
+
+    return (
+      candle.datetime < currentWeekDate &&
+      values.every(Number.isFinite)
+    );
+  });
+
+  candles.sort((a, b) =>
+    a.datetime.localeCompare(b.datetime)
+  );
+
+  return {
+    candles,
+    excludedUnfinished: rawCandles
+      .filter(candle => candle.datetime >= currentWeekDate)
+      .map(candle => candle.datetime)
+  };
+}
+
+// =====================================
 // TWO-CANDLE SWING DETECTOR
 // =====================================
 
