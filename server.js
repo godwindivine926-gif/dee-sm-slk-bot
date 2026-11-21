@@ -466,43 +466,6 @@ function detectDailyKeyLevels(candles) {
     }
   }
 
-  // Track subsequent body-close violations of original A/V levels.
-  for (const level of levels) {
-    if (
-      level.type !== "A-SHAPE" &&
-      level.type !== "V-SHAPE"
-    ) continue;
-
-    let violations = 0;
-    const violationDates = [];
-
-    for (
-      let i = level.formation_index + 1;
-      i < candles.length;
-      i++
-    ) {
-      const candle = candles[i];
-      const close = Number(candle.close);
-
-      const disrespected =
-        level.type === "A-SHAPE"
-          ? close > level.high
-          : close < level.low;
-
-      if (disrespected) {
-        violations++;
-        violationDates.push(candle.datetime);
-      }
-    }
-
-    level.disrespect_count = violations;
-    level.disrespect_dates = violationDates;
-
-    if (violations >= 2) {
-      level.status = "QMR";
-    }
-  }
-
   return levels;
 }
 
