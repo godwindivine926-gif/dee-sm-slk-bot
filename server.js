@@ -1861,10 +1861,187 @@ app.get("/test-h4-ebo", async (req, res) => {
 });
 
 // =====================================
+// AUTOMATIC WATCHLIST MONITOR (EVERY 30 MIN)
+// =====================================
+
+const MONITOR_INTERVAL_MS = 30 * 60 * 1000;
+const sentAlertKeys = new Set();
+let isMonitorRunning = false;
+let hasCompletedInitialSeed = false;
+
+function isWeekdayInWat(referenceDate = new Date()) {
+  const watNow = getWatNow(referenceDate);
+  const day = watNow.getUTCDay();
+  return day !== 0 && day !== 6;
+}
+
+function formatWatTimestamp(referenceDate = new Date()) {
+  const watNow = getWatNow(referenceDate);
+  return watNow.toISOString().replace("T", " ").slice(0, 16) + " WAT";
+}
+
+function buildCascadeAlertMessage(symbol, cascadeLabel, setup) {
+  const isBullish = setup.ebo.type.startsWith("BULLISH");
+  const badge = isBullish ? "🟢" : "🔴";
+  const directionWord = isBullish ? "BULLISH" : "BEARISH";
+
+  return (
+    `<b>${badge} ${directionWord} STORYLINE CONFIRMED — ${symbol} · ${cascadeLabel}</b>\n` +
+    `<b>EXTERNAL BREAKOUT (EBO)</b>\n\n` +
+    `${setup.htf_bias} ${setup.htf_level_type} level (${formatPrice(setup.htf_zone.low)} – ${formatPrice(setup.htf_zone.high)})\n` +
+    `<b>${setup.ebo.type}</b> broke pullback @ <b>${formatPrice(setup.ebo.broken_pullback_level)}</b> · closed <b>${setup.ebo.date}</b> (Close: <b>${formatPrice(setup.ebo.close)}</b>)\n\n` +
+    `<i>Cause level formed ${setup.htf_level_formed} · tapped ${setup.htf_contact_date}</i>\n` +
+    `<i>Last pullback formed ${setup.pullback.date} @ ${formatPrice(setup.pullback.level)}</i>\n\n` +
+    `Sent ${formatWatTimestamp()}\n` +
+    `Not an entry signal — cross-check your chart.`
+  );
+}
+
+async function recordStorylineEvent(chatId, symbol, cascade, ebo, { suppressAlert = false } = {}) {
+  const eventKey = `${chatId}:${symbol}:${cascade}:${ebo.type}:${ebo.date}`;
+  if (sentAlertKeys.has(eventKey)) {
+    return false;
+  }
+
+  try {
+    const existing = await databaseRequest(
+      `storyline_events?chat_id=eq.${chatId}` +
+        `&symbol=eq.${encodeURIComponent(symbol)}` +
+        `&event_type=eq.${encodeURIComponent(ebo.type)}` +
+        `&limit=5`
+    );
+
+    if (
+      Array.isArray(existing) &&
+      existing.some(row => String(row.event_date || row.date || "") === String(ebo.date))
+    ) {
+      sentAlertKeys.add(eventKey);
+      return false;
+    }
+  } catch (err) {
+    // Fallback gracefully if table/columns differ
+  }
+
+  sentAlertKeys.add(eventKey);
+
+  try {
+    await databaseRequest("storyline_events", "POST", {
+      chat_id: chatId,
+      symbol,
+      event_type: ebo.type,
+      event_date: ebo.date
+    });
+  } catch (err) {
+    console.warn("storyline_events insert skipped:", err.response?.data || err.message);
+  }
+
+  return !suppressAlert;
+}
+
+async function scanWatchlistOnce() {
+  if (isMonitorRunning) return;
+  if (!isWeekdayInWat()) return;
+
+  isMonitorRunning = true;
+  const isInitialSeedRun = !hasCompletedInitialSeed;
+
+  try {
+    const activeRows = await databaseRequest(
+      "watchlist?active=eq.true&select=chat_id,symbol"
+    );
+
+    if (!Array.isArray(activeRows) || !activeRows.length) {
+      hasCompletedInitialSeed = true;
+      return;
+    }
+
+    const symbols = [...new Set(activeRows.map(r => normalizeSymbol(r.symbol)))];
+    const marketCache = new Map();
+
+    for (const symbol of symbols) {
+      try {
+        const [rawW1, rawD1, rawH4] = await Promise.all([
+          getMarketCandles(symbol, "1week", 100),
+          getMarketCandles(symbol, "1day", 150),
+          getMarketCandles(symbol, "4h", 150)
+        ]);
+
+        const w1Candles = filterCompletedWeeklyCandles(rawW1).candles;
+        const d1Candles = filterCompletedDailyCandles(rawD1).candles;
+        const h4Candles = filterCompletedH4Candles(rawH4);
+
+        const w1ToD1 =
+          w1Candles.length >= 3 && d1Candles.length >= 5
+            ? detectWeeklyToDailyEbo(w1Candles, d1Candles)
+            : null;
+
+        const d1ToH4 =
+          d1Candles.length >= 5 && h4Candles.length >= 5
+            ? detectDailyToH4Ebo(d1Candles, h4Candles)
+            : null;
+
+        marketCache.set(symbol, { w1ToD1, d1ToH4 });
+      } catch (err) {
+        console.error(`Monitor fetch error for ${symbol}:`, err.message);
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 1200));
+    }
+
+    for (const row of activeRows) {
+      const chatId = parseChatId(row.chat_id);
+      const symbol = normalizeSymbol(row.symbol);
+      const data = marketCache.get(symbol);
+      if (!data) continue;
+
+      const w1D1Confirmed = (data.w1ToD1?.all_setups || []).filter(s => s.ebo);
+      for (const setup of w1D1Confirmed) {
+        const shouldAlert = await recordStorylineEvent(
+          chatId,
+          symbol,
+          "W1 > D1",
+          setup.ebo,
+          { suppressAlert: isInitialSeedRun }
+        );
+        if (shouldAlert) {
+          await sendMessage(chatId, buildCascadeAlertMessage(symbol, "W1 > D1", setup));
+        }
+      }
+
+      const d1H4Confirmed = (data.d1ToH4?.all_setups || []).filter(s => s.ebo);
+      for (const setup of d1H4Confirmed) {
+        const shouldAlert = await recordStorylineEvent(
+          chatId,
+          symbol,
+          "D1 > H4",
+          setup.ebo,
+          { suppressAlert: isInitialSeedRun }
+        );
+        if (shouldAlert) {
+          await sendMessage(chatId, buildCascadeAlertMessage(symbol, "D1 > H4", setup));
+        }
+      }
+    }
+
+    hasCompletedInitialSeed = true;
+  } catch (err) {
+    console.error("Watchlist scan error:", err.response?.data || err.message);
+  } finally {
+    isMonitorRunning = false;
+  }
+}
+
+function startWatchlistMonitor() {
+  setInterval(() => {
+    scanWatchlistOnce();
+  }, MONITOR_INTERVAL_MS);
+  
+// =====================================
 // SERVER START
 // =====================================
 
 app.listen(PORT, () => {
   console.log(`DEE SM SLK BOT running on port ${PORT}`);
+  startWatchlistMonitor();
 });
                                        
