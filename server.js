@@ -470,11 +470,78 @@ function detectDailyKeyLevels(candles) {
 }
 
 // =====================================
+// DAILY KEY-LEVEL REACTION DETECTOR
+// =====================================
+
+function detectDailyKeyLevelReactions(candles, levels) {
+  const reactions = [];
+
+  for (const level of levels) {
+    for (
+      let i = level.formation_index + 1;
+      i < candles.length;
+      i++
+    ) {
+      const candle = candles[i];
+
+      const high = Number(candle.high);
+      const low = Number(candle.low);
+      const close = Number(candle.close);
+
+      // Price must reach the key-level zone.
+      const touched = high >= level.low && low <= level.high;
+
+      if (!touched) continue;
+
+      // Bearish reaction: price reacts downward
+      // and closes below the entire zone.
+      if (
+        level.bias === "BEARISH" &&
+        close < level.low
+      ) {
+        reactions.push({
+          type: "BEARISH_KEY_LEVEL_REACTION",
+          level_type: level.type,
+          date: candle.datetime,
+          level_low: level.low,
+          level_high: level.high,
+          close,
+          confirmation: "BEARISH CLOSE BELOW KEY LEVEL"
+        });
+      }
+
+      // Bullish reaction: price reacts upward
+      // and closes above the entire zone.
+      if (
+        level.bias === "BULLISH" &&
+        close > level.high
+      ) {
+        reactions.push({
+          type: "BULLISH_KEY_LEVEL_REACTION",
+          level_type: level.type,
+          date: candle.datetime,
+          level_low: level.low,
+          level_high: level.high,
+          close,
+          confirmation: "BULLISH CLOSE ABOVE KEY LEVEL"
+        });
+      }
+    }
+  }
+
+  return reactions;
+}
+
+// =====================================
 // REBUILT D1 STRUCTURE DETECTOR
 // =====================================
 
 function detectDailyStructure(candles) {
   const swings = identifySwings(candles);
+  const keyLevels = detectDailyKeyLevels(candles);
+
+const keyLevelReactions =
+  detectDailyKeyLevelReactions(candles, keyLevels);
 
   let latestSwingHigh = null;
   let latestSwingLow = null;
@@ -702,7 +769,9 @@ function detectDailyStructure(candles) {
     protectedLH,
     protectedHL,
     swings,
-    events
+    events,
+    keyLevels,
+keyLevelReactions,
   };
         }
 
@@ -861,6 +930,12 @@ app.post("/webhook", async (req, res) => {
       }
 
       const result = detectDailyStructure(candles);
+        const reactionText = result.keyLevelReactions.length
+  ? result.keyLevelReactions.slice(-10).map(reaction =>
+      `• ${reaction.type} — ${reaction.date}\n` +
+      `  ${reaction.level_type} | Close: ${reaction.close}`
+    ).join("\n")
+  : "No confirmed key-level reactions.";
       const latestCandle = candles[candles.length - 1];
 
       const price = value =>
@@ -918,6 +993,7 @@ app.post("/webhook", async (req, res) => {
         `${describeStructure(result.bullishHH, "HH")}\n` +
         `Pending HL: ${describeSwing(result.pendingHL)}\n` +
         `Protected HL: ${describeSwing(result.protectedHL)}\n\n` +
+        `<b>DAILY KEY-LEVEL REACTIONS</b>\n${reactionText}\n\n` +
         `<b>RECENT EVENTS</b>\n${eventText}\n\n` +
         `<i>Completed D1 candles only. Candle bodies are used; wicks are ignored.</i>`;
 
