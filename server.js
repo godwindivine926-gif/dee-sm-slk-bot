@@ -802,12 +802,14 @@ const candles = filtered.candles;
       }
     }
 
-    res.json({
-      success: true,
-      symbol,
-      timeframe: "W1",
-      formations
-    });
+res.json({
+  success: true,
+  symbol,
+  timeframe: "W1",
+  status: developing.length > 0 ? "DEVELOPING" : "NO DEVELOPING CANDLE",
+  developing,
+  formations
+});
   } catch (error) {
     res.status(500).json({
       success: false,
