@@ -1012,11 +1012,21 @@ app.post("/webhook", async (req, res) => {
       .slice(-10);
 
     const details = levels.length
-      ? levels.map(level =>
-          `• ${level.type}\n` +
-          `  Bias: ${level.bias} | Formed: ${level.second_candle}\n` +
-          `  Zone: ${level.low} – ${level.high}`
-        ).join("\n")
+      levels.map(level => {
+  const eventDate =
+    status === "REACTED"
+      ? level.reaction?.date
+      : status === "INVALIDATED"
+        ? level.invalidation?.date
+        : null;
+
+  return (
+    `• ${level.type}\n` +
+    `  Bias: ${level.bias} | Formed: ${level.second_candle}\n` +
+    (eventDate ? `  ${status} DATE: ${eventDate}\n` : "") +
+    `  Zone: ${level.low} – ${level.high}`
+  );
+}).join("\n")
       : "None";
 
     return `<b>${status} LEVELS</b>\n${details}`;
