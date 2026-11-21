@@ -1596,17 +1596,18 @@ app.post("/webhook", async (req, res) => {
         getMarketCandles(symbol, "1day", 150),
         getMarketCandles(symbol, "4h", 150)
       ]);
-                      console.log("LAST CANDLES:", {
-      symbol,
-      w1Last: w1Candles?.[w1Candles.length - 1],
-      d1Last: d1Candles?.[d1Candles.length - 1],
-      h4Last: h4Candles?.[h4Candles.length - 1],
-    });
-                  
+                    
       const w1Candles = filterCompletedWeeklyCandles(rawW1).candles;
       const d1Candles = filterCompletedDailyCandles(rawD1).candles;
       const h4Candles = filterCompletedH4Candles(rawH4);
-
+                  
+      console.log("LAST CANDLES:", {
+        symbol,
+        w1Last: w1Candles?.[w1Candles.length - 1],
+        d1Last: d1Candles?.[d1Candles.length - 1],
+        h4Last: h4Candles?.[h4Candles.length - 1],
+      });
+                  
       const w1Storyline = w1Candles.length >= 2 ? detectWeeklyStoryline(w1Candles) : null;
       const d1Structure = d1Candles.length >= 5 ? detectDailyStructure(d1Candles) : null;
       const w1ToD1 = w1Candles.length >= 3 && d1Candles.length >= 5
