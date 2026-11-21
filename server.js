@@ -1970,7 +1970,7 @@ app.get("/test-h4-ebo", async (req, res) => {
       error: error.message
     });
   }
-});
+}};
 
 // =====================================
 // AUTOMATIC WATCHLIST MONITOR (EVERY 30 MIN)
@@ -2106,7 +2106,7 @@ async function scanWatchlistOnce() {
       const data = marketCache.get(symbol);
       if (!data) continue;
 
-            const w1D1Confirmed = (data.w1ToD1?.all_setups || []).filter(s => s.ebo);
+      const w1D1Confirmed = (data.w1ToD1?.all_setups || []).filter(s => s.ebo);
       for (const setup of w1D1Confirmed) {
         const shouldAlert = await recordStorylineEvent(
           chatId,
@@ -2144,7 +2144,6 @@ async function scanWatchlistOnce() {
     }
 
     hasCompletedInitialSeed = true;
-    
   } catch (err) {
     console.error("Watchlist scan error:", err.response?.data || err.message);
   } finally {
@@ -2156,8 +2155,8 @@ function startWatchlistMonitor() {
   setInterval(() => {
     scanWatchlistOnce();
   }, MONITOR_INTERVAL_MS);
-}
-
+                         }
+        
 // =====================================
 // SERVER START
 // =====================================
