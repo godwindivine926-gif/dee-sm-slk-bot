@@ -1420,8 +1420,8 @@ function detectLowerTimeframePullbackBreak({
         date: activePullback.date,
         level: activePullback.level
       },
-    ebo: confirmedEbo
-  };
+      ebo: confirmedEbo
+    };
 }
 
 function detectWeeklyToDailyEbo(w1Candles, d1Candles) {
