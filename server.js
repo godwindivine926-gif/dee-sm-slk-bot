@@ -1009,7 +1009,7 @@ app.post("/webhook", async (req, res) => {
   .map(status => {
     const levels = result.trackedKeyLevels
       .filter(level => level.status === status)
-      .slice(-10);
+      .slice(-5);
 
     let details = "None";
 
@@ -1035,7 +1035,7 @@ app.post("/webhook", async (req, res) => {
   })
   .join("\n\n");
         const reactionText = result.keyLevelReactions.length
-  ? result.keyLevelReactions.slice(-10).map(reaction =>
+  ? result.keyLevelReactions.slice(-5).map(reaction =>
       `• ${reaction.type} — ${reaction.date}\n` +
       `  Level: ${reaction.level_type} | Formed: ${reaction.level_formed}\n` +
 `  Close: ${reaction.close}`
