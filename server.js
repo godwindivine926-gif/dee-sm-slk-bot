@@ -1750,13 +1750,10 @@ app.post("/webhook", async (req, res) => {
           `<b>RECENT D1 EVENTS</b>\n${eventText}\n\n` +
           `<i>Structure and EBOs require completed candle-body closes.</i>`;
 
-        await sendMessage(chatId, report);
+                await sendMessage(chatId, report, buildStorylineInlineKeyboard(symbol));
       } finally {
         activeChecks.delete(lockKey);
       }
-      return;
-                  }
-                  
 
     if (command === "/weekly") {
       const now = new Date();
@@ -2118,8 +2115,12 @@ async function scanWatchlistOnce() {
           setup.ebo,
           { suppressAlert: isInitialSeedRun }
         );
-        if (shouldAlert) {
-          await sendMessage(chatId, buildCascadeAlertMessage(symbol, "W1 > D1", setup));
+                if (shouldAlert) {
+          await sendMessage(
+            chatId,
+            buildCascadeAlertMessage(symbol, "W1 > D1", setup),
+            buildStorylineInlineKeyboard(symbol)
+          );
         }
       }
 
@@ -2133,9 +2134,12 @@ async function scanWatchlistOnce() {
           { suppressAlert: isInitialSeedRun }
         );
         if (shouldAlert) {
-          await sendMessage(chatId, buildCascadeAlertMessage(symbol, "D1 > H4", setup));
+          await sendMessage(
+            chatId,
+            buildCascadeAlertMessage(symbol, "D1 > H4", setup),
+            buildStorylineInlineKeyboard(symbol)
+          );
         }
-      }
     }
 
     hasCompletedInitialSeed = true;
