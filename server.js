@@ -534,7 +534,7 @@ app.post("/webhook", async (req, res) => {
       return;
     }
 
-    if (command === "/check") {
+        if (command === "/check") {
       if (!argument) {
         await sendMessage(chatId, "Example: /check GBPUSD");
         return;
@@ -542,13 +542,82 @@ app.post("/webhook", async (req, res) => {
 
       const symbol = normalizeSymbol(argument);
 
-      await sendMessage(
-        chatId,
-        `${symbol} received. Full Telegram SLK analysis is not connected yet.`
-      );
-      return;
-    }
+      await sendMessage(chatId, `Checking ${symbol} D1 structure...`);
 
+      const raw = await getMarketCandles(symbol, "1day", 100);
+      const filtered = filterCompletedDailyCandles(raw);
+      const candles = filtered.candles;
+
+      if (candles.length < 5) {
+        await sendMessage(chatId, "Not enough completed D1 candles.");
+        return;
+      }
+
+      const result = detectDailyStructure(candles);
+      const latestCandle = candles[candles.length - 1];
+
+      const price = value =>
+        value === null || value === undefined
+          ? "Not formed"
+          : Number(value).toString();
+
+      const describeSwing = swing =>
+        swing
+          ? `${swing.date} | Level: ${price(swing.level)}`
+          : "Not formed";
+
+      const describeStructure = (item, label) =>
+        item
+          ? `${label}: ${item.date} | Body level: ${price(item.level)}`
+          : `${label}: Not confirmed`;
+
+      const recentEvents = result.events.slice(-10);
+
+      const eventText = recentEvents.length
+        ? recentEvents.map(event => {
+            if (event.type === "LL_CONFIRMED")
+              return `• LL confirmed — ${event.date}`;
+
+            if (event.type === "HH_CONFIRMED")
+              return `• HH confirmed — ${event.date}`;
+
+            if (event.type === "PROTECTED_LH_CONFIRMED")
+              return `• Protected LH — ${event.date}`;
+
+            if (event.type === "PROTECTED_HL_CONFIRMED")
+              return `• Protected HL — ${event.date}`;
+
+            if (event.type === "BULLISH_EBO")
+              return `• Bullish EBO — ${event.date}`;
+
+            if (event.type === "BEARISH_EBO")
+              return `• Bearish EBO — ${event.date}`;
+
+            return `• ${event.type} — ${event.date}`;
+          }).join("\n")
+        : "No confirmed structure events found.";
+
+      const report =
+        `<b>${symbol} — D1 STRUCTURE</b>\n` +
+        `Latest completed candle: ${latestCandle.datetime}\n\n` +
+        `<b>SWINGS</b>\n` +
+        `Swing High: ${describeSwing(result.latestSwingHigh)}\n` +
+        `Swing Low: ${describeSwing(result.latestSwingLow)}\n\n` +
+        `<b>BEARISH STRUCTURE</b>\n` +
+        `${describeStructure(result.bearishLL, "LL")}\n` +
+        `Pending LH: ${describeSwing(result.pendingLH)}\n` +
+        `Protected LH: ${describeSwing(result.protectedLH)}\n\n` +
+        `<b>BULLISH STRUCTURE</b>\n` +
+        `${describeStructure(result.bullishHH, "HH")}\n` +
+        `Pending HL: ${describeSwing(result.pendingHL)}\n` +
+        `Protected HL: ${describeSwing(result.protectedHL)}\n\n` +
+        `<b>RECENT EVENTS</b>\n${eventText}\n\n` +
+        `<i>Completed D1 candles only. Candle bodies are used; wicks are ignored.</i>`;
+
+      await sendMessage(chatId, report);
+      return;
+        }
+    
     if (command === "/weekly") {
       const now = new Date();
       const watOffset = 60 * 60 * 1000;
