@@ -1381,6 +1381,7 @@ function detectLowerTimeframePullbackBreak({
           broken_pullback_level: pullback.level,
           pullback_date: pullback.date
         };
+        break;
       }
 
       if (contactEvent.bias === "BULLISH" && close > pullback.level) {
@@ -1391,6 +1392,7 @@ function detectLowerTimeframePullbackBreak({
           broken_pullback_level: pullback.level,
           pullback_date: pullback.date
         };
+        break;
       }
     }
 
