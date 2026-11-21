@@ -1700,6 +1700,24 @@ app.post("/webhook", async (req, res) => {
       await sendMessage(chatId, `<b>LAST WEEK'S EVENTS</b>\n\n${report}`);
       return;
     }
+        const lowerText = String(message?.text || req.body?.message?.text || "")
+      .trim()
+      .toLowerCase();
+
+    if (
+      !lowerText.startsWith("/") &&
+      (lowerText.includes("new week") || lowerText.includes("ready for the week"))
+    ) {
+      const newWeekMsg =
+        `<b>🔥 New-week active — what’s on your radar?</b>\n\n` +
+        `- <b>Weekly focus</b> – use <code>/weekly</code> to see confirmed setups.\n` +
+        `- <b>Watchlist</b> – use <code>/add</code>, <code>/remove</code>, or <code>/watchlist</code> to manage monitored markets.\n` +
+        `- <b>Market reads</b> – use <code>/check [PAIR]</code> for snapshot, bias, and breakout status.\n\n` +
+        `Let me know which pair you’d like a read on, or add more pairs to your watchlist.`;
+
+      await sendMessage(chatId, newWeekMsg, buildStorylineInlineKeyboard("GBPUSD"));
+      return;
+    }
   } catch (error) {
     console.error("Webhook error:", error.response?.data || error.message);
 
