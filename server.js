@@ -1416,7 +1416,6 @@ function detectLowerTimeframePullbackBreak({
     },
     status: confirmedEbo ? "EBO_CONFIRMED" : "WAITING_FOR_PULLBACK_BREAK",
     pullback: {
-            pullback: {
         type: activePullback.type,
         date: activePullback.date,
         level: activePullback.level
