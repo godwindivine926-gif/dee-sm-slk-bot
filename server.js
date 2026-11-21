@@ -1656,47 +1656,37 @@ app.post("/webhook", async (req, res) => {
           `<b>Trend ${d1Bias !== "NEUTRAL" ? `aligned with D1 (${d1Bias})` : "neutral on D1"}</b>`
         : `D1→H4: No active setup.`;
       const useD1H4 = Boolean(d1h4Setup?.ebo);
-      const activeLeg = useD1H4 ? "D1 → H4" : "W1 → D1";
-      const activeBias = useD1H4 ? d1Bias : w1Bias;
+            const latestW1 = w1Candles?.[w1Candles.length - 1];
+      const w1Summary = w1Storyline?.formation
+        ? `W1: ${w1Storyline.formation} (${w1Storyline.bias || "NEUTRAL"}) · ${w1Storyline.reaction_date || latestW1?.datetime || ""}`
+        : `W1 close: ${latestW1?.datetime || "N/A"} (${w1Bias})`;
 
-      const resolvedDirection =
-        activeBias === "BULLISH"
-          ? "BUY"
-          : activeBias === "BEARISH"
-          ? "SELL"
-          : d1h4Setup?.ebo?.type?.startsWith("BULLISH") || w1d1Setup?.ebo?.type?.startsWith("BULLISH")
-          ? "BUY"
-          : d1h4Setup?.ebo?.type?.startsWith("BEARISH") || w1d1Setup?.ebo?.type?.startsWith("BEARISH")
-          ? "SELL"
-          : null;
+      const d1LevelType = d1h4Setup?.htf_level_type || d1Structure?.bullish_key_level_contact?.level_type || d1Structure?.bearish_key_level_contact?.level_type || "Key Level";
+      const d1ContactDate = d1h4Setup?.htf_contact_date || d1Structure?.bullish_key_level_contact?.date || d1Structure?.bearish_key_level_contact?.date || "N/A";
+      const d1LevelPrice = d1h4Setup?.htf_zone?.low ?? d1Structure?.bullish_key_level_contact?.level_low ?? d1Structure?.bearish_key_level_contact?.level_low;
 
-      const headerPrefix =
-        resolvedDirection === "SELL"
+      const h4StatusLine = d1h4Setup?.ebo
+        ? `✅ <b>4H aligned:</b> BO @ <b>${formatPrice(d1h4Setup.ebo.broken_pullback_level)}</b> (${d1h4Setup.ebo.date || "confirmed"})`
+        : `⏳ <b>4H not aligned yet</b> — waiting for 4H external breakout`;
+
+      const dirLabel =
+        d1Bias === "BEARISH"
           ? "🚨 <b>SELL"
-          : resolvedDirection === "BUY"
+          : d1Bias === "BULLISH"
           ? "🟢 <b>BUY"
           : `${badge} <b>${symbol}`;
 
-      const headerLine = resolvedDirection
-        ? `${headerPrefix} · ${symbol} · ${activeLeg}</b>`
-        : `${headerPrefix} — MARKET READ</b>`;
-
-      const alignmentNote =
-        w1Bias !== "NEUTRAL" && d1Bias !== "NEUTRAL"
-          ? w1Bias === d1Bias
-            ? `Weekly BO aligned in the same direction as the Daily BO`
-            : `⚠️ Weekly is ${w1Bias.toLowerCase()} BUT in its reversal phase`
-          : "";
-
       const msg =
-        `${headerLine}\n` +
-        `${useD1H4 || w1d1Setup?.ebo ? "External breakout confirmed" : "Structure monitoring"}\n\n` +
-        `${useD1H4 ? d1h4Block : w1d1Block}\n` +
-        (alignmentNote ? `${alignmentNote}\n\n` : `\n`) +
+        `${dirLabel} · ${symbol} · D1 → H4</b>\n` +
+        `${d1h4Setup?.ebo ? "External breakout confirmed" : "Monitoring D1 structure & 4H alignment"}\n\n` +
+        `<i>${w1Summary}</i>\n` +
+        `<b>D1 reaction / KL:</b> ${d1LevelType}${d1LevelPrice != null ? ` @ ${formatPrice(d1LevelPrice)}` : ""} (${d1ContactDate})\n` +
+        (d1h4Setup?.ebo?.pullback_date ? `<b>Pullback level date:</b> ${d1h4Setup.ebo.pullback_date}\n` : ``) +
+        `${h4StatusLine}\n\n` +
         `All times shown are candle open times.\n\n` +
         `⚠️ Not an entry signal. Bias only — wait for your entry model.\n\n` +
         `Sent ${formatWatTimestamp()}`;
-      await sendMessage(chatId, msg, buildStorylineInlineKeyboard(symbol));
+        await sendMessage(chatId, msg, buildStorylineInlineKeyboard(symbol));
       return;
         }
     
