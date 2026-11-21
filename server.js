@@ -1311,6 +1311,38 @@ app.get("/test-d1-ebo", async (req, res) => {
 });
 
 // =====================================
+// D1 KEY-LEVEL TEST
+// =====================================
+
+app.get("/test-d1-key-levels", async (req, res) => {
+  try {
+    const symbol = normalizeSymbol(req.query.symbol);
+
+    const raw = await getMarketCandles(symbol, "1day", 100);
+    const filtered = filterCompletedDailyCandles(raw);
+    const candles = filtered.candles;
+
+    const levels = detectDailyKeyLevels(candles);
+
+    res.json({
+      success: true,
+      symbol,
+      timeframe: "D1",
+      latest_completed_candle: candles[candles.length - 1]?.datetime,
+      total_levels: levels.length,
+      key_levels: levels,
+      excluded_weekend_dates: filtered.excludedWeekend,
+      excluded_unfinished_dates: filtered.excludedUnfinished
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// =====================================
 // H4 CANDLE TEST
 // =====================================
 
