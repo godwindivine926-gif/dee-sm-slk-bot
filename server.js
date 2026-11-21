@@ -1978,20 +1978,57 @@ function formatWatTimestamp(referenceDate = new Date()) {
   return watNow.toISOString().replace("T", " ").slice(0, 16) + " WAT";
 }
 
-function buildCascadeAlertMessage(symbol, cascadeLabel, setup) {
+function buildCascadeAlertMessage(symbol, cascadeLabel, setup, context = {}) {
   const isBullish = setup.ebo.type.startsWith("BULLISH");
   const badge = isBullish ? "🟢" : "🔴";
   const directionWord = isBullish ? "BULLISH" : "BEARISH";
+  const breakoutKind =
+    setup.breakout_kind ||
+    (String(setup.ebo.type).includes("INT") ? "INTERNAL BREAKOUT" : "EXTERNAL BREAKOUT");
+
+  const htfTimeframe = cascadeLabel.split(">")[0]?.trim() || "HTF";
+  const ltfTimeframe = cascadeLabel.split(">")[1]?.trim() || "LTF";
+  const levelLabel = `${String(setup.htf_level_type || "LEVEL").toLowerCase()} level`;
+
+  const rejectionLine =
+    setup.rejection_price !== undefined && setup.rejection_price !== null
+      ? `${htfTimeframe} ${levelLabel} @ <b>${formatPrice(setup.rejection_price)}</b>\n`
+      : `${htfTimeframe} ${levelLabel} (${formatPrice(setup.htf_zone.low)} – ${formatPrice(setup.htf_zone.high)})\n`;
+
+  const breakoutLine =
+    `<b>${ltfTimeframe} breakout</b> broke pullback @ <b>${formatPrice(setup.ebo.broken_pullback_level)}</b> ` +
+    `· closed <b>${setup.ebo.date}</b> (Close: <b>${formatPrice(setup.ebo.close)}</b>)`;
+
+  const metaLines = [
+    `Cause level formed ${setup.htf_level_formed} · tapped ${setup.htf_contact_date}`,
+    setup.pullback
+      ? `Pullback level formed ${setup.pullback.date} @ ${formatPrice(setup.pullback.level)}`
+      : null
+  ]
+    .filter(Boolean)
+    .map(line => `<i>${line}</i>`)
+    .join("\n");
+
+  const alignmentLine =
+    context.w1Bias && context.d1Bias
+      ? `\n\nW1 ${context.w1Bias} · D1 ${context.d1Bias} — ` +
+        `${context.w1Bias === context.d1Bias ? "W/D ALIGNED · CONTINUATION" : "W/D CONFLICTING · REVERSAL"}`
+      : "";
+
+  const nextDayRuleLine = context.nextDayRule
+    ? `\nNEXT DAY RULE: ${context.nextDayRule}`
+    : "";
 
   return (
     `<b>${badge} ${directionWord} STORYLINE CONFIRMED — ${symbol} · ${cascadeLabel}</b>\n` +
-    `<b>EXTERNAL BREAKOUT (EBO)</b>\n\n` +
-    `${setup.htf_bias} ${setup.htf_level_type} level (${formatPrice(setup.htf_zone.low)} – ${formatPrice(setup.htf_zone.high)})\n` +
-    `<b>${setup.ebo.type}</b> broke pullback @ <b>${formatPrice(setup.ebo.broken_pullback_level)}</b> · closed <b>${setup.ebo.date}</b> (Close: <b>${formatPrice(setup.ebo.close)}</b>)\n\n` +
-    `<i>Cause level formed ${setup.htf_level_formed} · tapped ${setup.htf_contact_date}</i>\n` +
-    `<i>Last pullback formed ${setup.pullback.date} @ ${formatPrice(setup.pullback.level)}</i>\n\n` +
-    `Sent ${formatWatTimestamp()}\n` +
-    `Not an entry signal — cross-check your chart.`
+    `<b>${breakoutKind}</b>\n\n` +
+    `${rejectionLine}` +
+    `${breakoutLine}\n\n` +
+    `${metaLines}` +
+    `${alignmentLine}` +
+    `${nextDayRuleLine}\n` +
+    `Sent ${formatWatTimestamp()}\n\n` +
+    `Not an entry signal — bias context only.`
   );
 }
 
