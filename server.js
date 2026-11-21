@@ -827,7 +827,9 @@ app.get("/test-w1-open-close", async (req, res) => {
     const symbol = normalizeSymbol(req.query.symbol);
 
     const raw = await getMarketCandles(symbol, "1week", 100);
-    const candles = raw.slice(1).reverse();
+const filtered = filterCompletedWeeklyCandles(raw);
+const candles = filtered.candles;
+const developing = filtered.developing;
 
     const formations = [];
 
@@ -873,12 +875,14 @@ app.get("/test-w1-open-close", async (req, res) => {
       }
     }
 
-    res.json({
-      success: true,
-      symbol,
-      timeframe: "W1",
-      formations
-    });
+res.json({
+  success: true,
+  symbol,
+  timeframe: "W1",
+  status: developing.length > 0 ? "DEVELOPING" : "NO DEVELOPING CANDLE",
+  developing,
+  formations
+});
   } catch (error) {
     res.status(500).json({
       success: false,
