@@ -248,8 +248,26 @@ function filterCompletedWeeklyCandles(rawCandles) {
 }
 
 function filterCompletedH4Candles(rawCandles) {
+  const watNow = getWatNow();
+  const nowIsoPrefix = watNow.toISOString().replace("T", " ").slice(0, 16);
+
   const valid = rawCandles
-    .filter(isValidOhlcCandle)
+    .filter(candle => {
+      if (!isValidOhlcCandle(candle)) return false;
+
+      const dtStr = String(candle.datetime).trim();
+      const datePart = dtStr.slice(0, 10);
+      const day = new Date(`${datePart}T00:00:00Z`).getUTCDay();
+
+      // Exclude weekends (Saturday = 6, Sunday = 0)
+      if (day === 0 || day === 6) return false;
+
+      // Exclude current/future developing bars in WAT
+      const comparable = dtStr.replace("T", " ").slice(0, 16);
+      if (comparable >= nowIsoPrefix) return false;
+
+      return true;
+    })
     .sort((a, b) => a.datetime.localeCompare(b.datetime));
 
   return valid.length > 1 ? valid.slice(0, -1) : valid;
@@ -1466,7 +1484,7 @@ app.post("/webhook", async (req, res) => {
       );
       return;
 }
-          if (command === "/check") {
+                if (command === "/check") {
       if (!argument) {
         await sendMessage(chatId, "Example: /check GBPUSD");
         return;
@@ -1508,6 +1526,12 @@ app.post("/webhook", async (req, res) => {
         const describeSwing = swing =>
           swing ? `${swing.date} | Level: ${formatPrice(swing.level)}` : "Not formed";
 
+        const describeProtectedSwing = swing => {
+          if (!swing) return "Not formed";
+          const conf = swing.confirmation_date ? ` (conf. ${swing.confirmation_date})` : "";
+          return `${swing.date}${conf} | Level: ${formatPrice(swing.level)}`;
+        };
+
         const describeStructure = (item, label) =>
           item
             ? `${label}: ${item.date} | Body level: ${formatPrice(item.level)}`
@@ -1515,20 +1539,37 @@ app.post("/webhook", async (req, res) => {
 
         const formatCascadeSetup = (title, cascadeResult) => {
           const setup = cascadeResult?.latest_setup;
+          const allSetups = cascadeResult?.all_setups || [];
+
           if (!setup) {
             return `<b>${title}</b>\nNo key-level contact detected.\n\n`;
           }
+
           const pullbackLine = setup.pullback
             ? `Last Pullback: ${setup.pullback.date} | Level: ${formatPrice(setup.pullback.level)}`
             : "Last Pullback: None found";
+
           const eboLine = setup.ebo
             ? `✅ ${setup.ebo.type} — ${setup.ebo.date} (Close: ${formatPrice(setup.ebo.close)})`
             : `⏳ Status: ${setup.status}`;
+
+          // Also surface the most recent confirmed EBO if the latest tap hasn't broken yet
+          let latestConfirmedExtra = "";
+          if (!setup.ebo) {
+            const confirmedSetups = allSetups.filter(s => s.ebo);
+            if (confirmedSetups.length) {
+              const lastConf = confirmedSetups[confirmedSetups.length - 1];
+              latestConfirmedExtra =
+                `\nLatest Confirmed EBO: ${lastConf.ebo.type} — ${lastConf.ebo.date} ` +
+                `(Close: ${formatPrice(lastConf.ebo.close)} | Tap: ${lastConf.htf_contact_date})`;
+            }
+          }
+
           return (
             `<b>${title}</b>\n` +
             `HTF Level: ${setup.htf_level_type} (${setup.htf_bias}) | Tap: ${setup.htf_contact_date}\n` +
             `${pullbackLine}\n` +
-            `${eboLine}\n\n`
+            `${eboLine}${latestConfirmedExtra}\n\n`
           );
         };
 
@@ -1551,8 +1592,8 @@ app.post("/webhook", async (req, res) => {
         const h4SectionText = h4Result
           ? `<b>H4 STRUCTURE & EBO (STANDALONE)</b>\n` +
             `Latest H4: ${h4Candles[h4Candles.length - 1].datetime} | Bias: ${h4Result.direction}\n` +
-            `H4 Protected LH: ${describeSwing(h4Result.protectedLH)}\n` +
-            `H4 Protected HL: ${describeSwing(h4Result.protectedHL)}\n` +
+            `H4 Protected LH: ${describeProtectedSwing(h4Result.protectedLH)}\n` +
+            `H4 Protected HL: ${describeProtectedSwing(h4Result.protectedHL)}\n` +
             `H4 EBOs: ${
               h4EboEvents.length
                 ? h4EboEvents
@@ -1587,8 +1628,8 @@ app.post("/webhook", async (req, res) => {
           `${formatCascadeSetup("W1 → D1 PULLBACK EBO", w1ToD1)}` +
           `${formatCascadeSetup("D1 → H4 PULLBACK EBO", d1ToH4)}` +
           `<b>D1 STRUCTURE</b>\n` +
-          `${describeStructure(result.bearishLL, "LL")} | Protected LH: ${describeSwing(result.protectedLH)}\n` +
-          `${describeStructure(result.bullishHH, "HH")} | Protected HL: ${describeSwing(result.protectedHL)}\n\n` +
+          `${describeStructure(result.bearishLL, "LL")} | Protected LH: ${describeProtectedSwing(result.protectedLH)}\n` +
+          `${describeStructure(result.bullishHH, "HH")} | Protected HL: ${describeProtectedSwing(result.protectedHL)}\n\n` +
           `${h4SectionText}` +
           `${keyLevelSummaryText}` +
           `<b>RECENT D1 EVENTS</b>\n${eventText}\n\n` +
@@ -1599,7 +1640,8 @@ app.post("/webhook", async (req, res) => {
         activeChecks.delete(lockKey);
       }
       return;
-    }
+                  }
+                  
 
     if (command === "/weekly") {
       const now = new Date();
