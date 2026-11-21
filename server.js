@@ -945,6 +945,210 @@ protected_hl_date: bullishKeyLevelContact.protected_hl.date
         }
 
 // =====================================
+// H4 STRUCTURE AND EBO DETECTOR
+// =====================================
+
+function detectH4Structure(candles) {
+  const swings = identifySwings(candles);
+
+  let latestSwingHigh = null;
+  let latestSwingLow = null;
+
+  let bullishHH = null;
+  let bearishLL = null;
+
+  let pendingHL = null;
+  let pendingLH = null;
+
+  let protectedHL = null;
+  let protectedLH = null;
+
+  let direction = "UNCONFIRMED";
+
+  const events = [];
+
+  for (let i = 0; i < candles.length; i++) {
+    const candle = candles[i];
+    const close = Number(candle.close);
+
+    const formedSwings = swings.filter(
+      swing => swing.index === i
+    );
+
+    for (const swing of formedSwings) {
+      if (swing.type === "SWING_HIGH") {
+        latestSwingHigh = swing;
+
+        if (direction === "BEARISH" && bearishLL) {
+          pendingLH = swing;
+        }
+      }
+
+      if (swing.type === "SWING_LOW") {
+        latestSwingLow = swing;
+
+        if (direction === "BULLISH" && bullishHH) {
+          pendingHL = swing;
+        }
+      }
+    }
+
+    // BEARISH EBO
+    if (
+      protectedHL &&
+      i > protectedHL.index &&
+      close < protectedHL.level
+    ) {
+      events.push({
+        type: "BEARISH_EBO",
+        date: candle.datetime,
+        close,
+        broken_level: protectedHL.level
+      });
+
+      protectedHL = null;
+      pendingHL = null;
+    }
+
+    // BULLISH EBO
+    if (
+      protectedLH &&
+      i > protectedLH.index &&
+      close > protectedLH.level
+    ) {
+      events.push({
+        type: "BULLISH_EBO",
+        date: candle.datetime,
+        close,
+        broken_level: protectedLH.level
+      });
+
+      protectedLH = null;
+      pendingLH = null;
+    }
+
+    // CONFIRM PROTECTED LH
+    if (
+      direction === "BEARISH" &&
+      bearishLL &&
+      pendingLH &&
+      i > pendingLH.index &&
+      close < bearishLL.level
+    ) {
+      protectedLH = {
+        ...pendingLH,
+        confirmation_date: candle.datetime
+      };
+
+      pendingLH = null;
+
+      events.push({
+        type: "PROTECTED_LH_CONFIRMED",
+        date: protectedLH.date,
+        level: protectedLH.level
+      });
+    }
+
+    // CONFIRM PROTECTED HL
+    if (
+      direction === "BULLISH" &&
+      bullishHH &&
+      pendingHL &&
+      i > pendingHL.index &&
+      close > bullishHH.level
+    ) {
+      protectedHL = {
+        ...pendingHL,
+        confirmation_date: candle.datetime
+      };
+
+      pendingHL = null;
+
+      events.push({
+        type: "PROTECTED_HL_CONFIRMED",
+        date: protectedHL.date,
+        level: protectedHL.level
+      });
+    }
+
+    // CONFIRM NEW LL
+    if (
+      latestSwingLow &&
+      i > latestSwingLow.index &&
+      close < latestSwingLow.level &&
+      (!bearishLL ||
+        bearishLL.broken_swing_low !== latestSwingLow.level)
+    ) {
+      bearishLL = {
+        date: candle.datetime,
+        index: i,
+        level: bodyBottom(candle),
+        broken_swing_low: latestSwingLow.level
+      };
+
+      direction = "BEARISH";
+
+      bullishHH = null;
+      pendingHL = null;
+      protectedHL = null;
+
+      pendingLH = null;
+      protectedLH = null;
+
+      events.push({
+        type: "LL_CONFIRMED",
+        date: candle.datetime,
+        level: bearishLL.level
+      });
+    }
+
+    // CONFIRM NEW HH
+    if (
+      latestSwingHigh &&
+      i > latestSwingHigh.index &&
+      close > latestSwingHigh.level &&
+      (!bullishHH ||
+        bullishHH.broken_swing_high !== latestSwingHigh.level)
+    ) {
+      bullishHH = {
+        date: candle.datetime,
+        index: i,
+        level: bodyTop(candle),
+        broken_swing_high: latestSwingHigh.level
+      };
+
+      direction = "BULLISH";
+
+      bearishLL = null;
+      pendingLH = null;
+      protectedLH = null;
+
+      pendingHL = null;
+      protectedHL = null;
+
+      events.push({
+        type: "HH_CONFIRMED",
+        date: candle.datetime,
+        level: bullishHH.level
+      });
+    }
+  }
+
+  return {
+    direction,
+    latestSwingHigh,
+    latestSwingLow,
+    bullishHH,
+    bearishLL,
+    pendingHL,
+    pendingLH,
+    protectedHL,
+    protectedLH,
+    events
+  };
+}
+
+// =====================================
 // HOME
 // =====================================
 
@@ -1626,6 +1830,30 @@ app.get("/test-h4-candles", async (req, res) => {
   }
 });
 
+app.get("/test-h4-ebo", async (req, res) => {
+  try {
+    const symbol = normalizeSymbol(req.query.symbol || "GBPUSD");
+
+    const raw = await getMarketCandles(symbol, "4h", 100);
+    const candles = raw.slice(1).reverse();
+
+    const result = detectH4Structure(candles);
+
+    res.json({
+      success: true,
+      symbol,
+      timeframe: "H4",
+      latestCandle: candles[candles.length - 1],
+      ...result
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
 // =====================================
 // SERVER START
 // =====================================
