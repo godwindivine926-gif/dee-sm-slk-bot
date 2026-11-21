@@ -1964,14 +1964,14 @@ app.get("/test-h4-ebo", async (req, res) => {
       latestCandle: candles[candles.length - 1] || null,
       ...result
     });
+    
   } catch (error) {
     res.status(500).json({
       success: false,
       error: error.message
     });
   }
-};
-
+});
 
 // =====================================
 // AUTOMATIC WATCHLIST MONITOR (EVERY 30 MIN)
