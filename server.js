@@ -1790,29 +1790,26 @@ app.post("/webhook", async (req, res) => {
         ? `✅ <b>4H aligned:</b> BO @ <b>${formatPrice(d1h4Setup.ebo.broken_pullback_level)}</b> (${d1h4Setup.ebo.date || "confirmed"})`
         : `⏳ <b>4H not aligned yet</b> — waiting for 4H external breakout`;
 
-      const dirLabel =
-        d1Bias === "BEARISH"
-          ? "🚨 <b>SELL"
-          : d1Bias === "BULLISH"
-          ? "🟢 <b>BUY"
-          : `${badge} <b>${symbol}`;
+      const storylineEmoji = d1Bias === "BULLISH" ? "🟢" : "🔴";
+const storylineDir = d1Bias === "BULLISH" ? "BULLISH" : "BEARISH";
+const breakScopeLabel = d1h4Setup?.ebo ? "EXTERNAL BREAKOUT" : "INTERNAL BREAKOUT";
 
-      const w1ToD1Ebo = w1ToD1?.latest_setup?.ebo;
-const w1ToD1Line = w1ToD1Ebo
-  ? `<b>W1 → D1 break:</b> ${w1ToD1Ebo.type} (${w1ToD1Ebo.date}) @ ${formatPrice(w1ToD1Ebo.close)}\n`
+const eboLine = w1ToD1Ebo
+  ? `<b>H4 INT breakout broke ${d1LevelType} @ ${formatPrice(w1ToD1Ebo.close)}</b>\n· closed ${w1ToD1Ebo.date}\n\n`
   : "";
 
 const msg =
-  `${dirLabel} · ${symbol} · D1 & H4</b>\n` +
-  `${d1h4Setup?.ebo ? "External breakout confirmed" : "Monitoring D1 structure..."}\n` +
-  `<i>${w1Summary}</i>\n` +
-  `${w1ToD1Line}` +
-  `<b>D1 reaction / KL:</b> ${d1LevelType}${d1LevelPrice != null ? ` @ ${formatPrice(d1LevelPrice)}` : ""}${d1h4Setup?.ebo?.pullback_date ? ` · <b>Pullback level date:</b> ${d1h4Setup.ebo.pullback_date}` : ""}\n` +
-  `${h4StatusLine}\n\n` +
-  'All times shown are candle open times.\n\n' +
-  '⚠️ Not an entry signal. Bias only - wait for your entry model.\n\n' +
-  `Sent ${formatWatTimestamp()}`;
-   await sendMessage(chatId, msg, buildStorylineInlineKeyboard(symbol));
+  `${storylineEmoji} <b>${storylineDir} STORYLINE CONFIRMED —</b>\n` +
+  `<b>${symbol} · D1 > H4</b>\n` +
+  `<b>${breakScopeLabel}</b>\n\n` +
+  `${d1LevelType} rejection @ ${d1LevelPrice != null ? `<b>${formatPrice(d1LevelPrice)}</b>` : "N/A"}\n` +
+  `${eboLine}` +
+  `<i>Cause level formed ${d1ContactDate || "N/A"} · tapped ${d1ContactDate || "N/A"}</i>\n` +
+  `<i>Breakout level formed ${w1ToD1Ebo?.pullback_date || "N/A"}</i>\n\n` +
+  `${w1Summary}\n\n` +
+  `Sent ${formatWatTimestamp()}\n\n` +
+  `Not an entry signal — bias context only.`;
+  await sendMessage(chatId, msg, buildStorylineInlineKeyboard(symbol));
       return;
         }
     
