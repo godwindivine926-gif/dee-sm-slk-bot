@@ -1314,17 +1314,26 @@ function detectLowerTimeframePullbackBreak({
   contactEvent,
   lowerCandles
 }) {
-  const lowerSwings = identifySwings(lowerCandles);
+    const lowerSwings = identifySwings(lowerCandles);
   const contactCutoffMs = toTimestampMs(contactEvent.contact_date, true);
 
   const requiredPullbackType =
     contactEvent.bias === "BEARISH" ? "SWING_LOW" : "SWING_HIGH";
 
-  const candidatePullbacks = lowerSwings.filter(
+  const postContactPullbacks = lowerSwings.filter(
+    swing =>
+      swing.type === requiredPullbackType &&
+      toTimestampMs(swing.date, false) >= contactCutoffMs
+  );
+
+  const fallbackPullbacks = lowerSwings.filter(
     swing =>
       swing.type === requiredPullbackType &&
       toTimestampMs(swing.date, false) <= contactCutoffMs
   );
+
+  const candidatePullbacks =
+    postContactPullbacks.length > 0 ? postContactPullbacks : fallbackPullbacks;
 
   if (!candidatePullbacks.length) {
     return {
@@ -1360,7 +1369,6 @@ function detectLowerTimeframePullbackBreak({
         broken_pullback_level: lastPullback.level,
         pullback_date: lastPullback.date
       };
-      break;
     }
 
     if (contactEvent.bias === "BULLISH" && close > lastPullback.level) {
@@ -1371,7 +1379,6 @@ function detectLowerTimeframePullbackBreak({
         broken_pullback_level: lastPullback.level,
         pullback_date: lastPullback.date
       };
-      break;
     }
   }
 
