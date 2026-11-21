@@ -64,24 +64,63 @@ function getWatNow(referenceDate = new Date()) {
   return new Date(referenceDate.getTime() + WAT_OFFSET_MS);
 }
 
-async function sendMessage(chatId, text) {
+async function sendMessage(chatId, text, replyMarkup = null) {
   if (!BOT_TOKEN) {
     console.error("Telegram error: BOT_TOKEN is missing.");
     return;
   }
 
   try {
-    await axios.post(
-      `${TELEGRAM_API}/sendMessage`,
-      {
-        chat_id: chatId,
-        text,
-        parse_mode: "HTML"
-      },
-      { timeout: 10000 }
-    );
+    const payload = {
+      chat_id: chatId,
+      text,
+      parse_mode: "HTML"
+    };
+
+    if (replyMarkup) {
+      payload.reply_markup = replyMarkup;
+    }
+
+    await axios.post(`${TELEGRAM_API}/sendMessage`, payload, {
+      timeout: 10000
+    });
   } catch (error) {
     console.error("Telegram error:", error.response?.data || error.message);
+  }
+}
+
+function buildStorylineInlineKeyboard(symbol) {
+  const compactSymbol = normalizeSymbol(symbol).replace("/", "");
+
+  return {
+    inline_keyboard: [
+      [
+        { text: "Break tap", callback_data: `cb:break:${compactSymbol}` },
+        { text: "3CR tap", callback_data: `cb:3cr:${compactSymbol}` }
+      ],
+      [
+        { text: "Structure", callback_data: `cb:struct:${compactSymbol}` },
+        { text: "Confirmation entry", callback_data: `cb:entry:${compactSymbol}` }
+      ]
+    ]
+  };
+}
+
+async function answerCallbackQuery(callbackQueryId, text = "") {
+  if (!BOT_TOKEN || !callbackQueryId) return;
+
+  try {
+    await axios.post(
+      `${TELEGRAM_API}/answerCallbackQuery`,
+      {
+        callback_query_id: callbackQueryId,
+        text,
+        show_alert: false
+      },
+      { timeout: 8000 }
+    );
+  } catch (error) {
+    console.error("Callback answer error:", error.response?.data || error.message);
   }
 }
 
@@ -1393,9 +1432,59 @@ app.post("/webhook", async (req, res) => {
   let chatId = null;
 
   try {
+    const callbackQuery = req.body?.callback_query;
+    if (callbackQuery && callbackQuery.data) {
+      chatId = parseChatId(callbackQuery.message.chat.id);
+      const [, action, rawSym] = String(callbackQuery.data).split(":");
+      const symbol = normalizeSymbol(rawSym);
+
+      await answerCallbackQuery(callbackQuery.id, `${symbol} · ${action}`);
+
+      if (action === "break") {
+        await sendMessage(
+          chatId,
+          `<b>${symbol} — BREAK TAP DETAILS</b>\nTap a key level and wait for a completed candle-body close breaking the prior pullback.`
+        );
+        return;
+      }
+
+      if (action === "3cr") {
+        await sendMessage(
+          chatId,
+          `<b>${symbol} — 3CR TAP</b>\nCross-check reaction candle closes and zone boundaries on your chart.`
+        );
+        return;
+      }
+
+      if (action === "struct") {
+        const rawD1 = await getMarketCandles(symbol, "1day", 150);
+        const d1Candles = filterCompletedDailyCandles(rawD1).candles;
+        const d1 = detectDailyStructure(d1Candles);
+        await sendMessage(
+          chatId,
+          `<b>${symbol} — D1 STRUCTURE SNAPSHOT</b>\n` +
+            `Bias: <b>${d1.direction}</b>\n` +
+            `LL: ${d1.bearishLL ? `${d1.bearishLL.date} @ ${formatPrice(d1.bearishLL.level)}` : "Not confirmed"}\n` +
+            `Protected LH: ${d1.protectedLH ? `${d1.protectedLH.date} @ ${formatPrice(d1.protectedLH.level)}` : "Not formed"}`
+        );
+        return;
+      }
+
+      if (action === "entry") {
+        await sendMessage(
+          chatId,
+          `<b>${symbol} — CONFIRMATION ENTRY CHECKLIST</b>\n` +
+            `1. Higher-timeframe key-level tap confirmed\n` +
+            `2. Lower-timeframe pullback broken by candle-body close\n` +
+            `3. Cross-check chart structure & risk before acting`
+        );
+        return;
+      }
+    }
+
     const message = req.body?.message;
     if (!message || !message.text) return;
-
+    
     chatId = parseChatId(message.chat.id);
     const parts = message.text.trim().split(/\s+/);
 
