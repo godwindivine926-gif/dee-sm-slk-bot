@@ -1005,6 +1005,25 @@ app.post("/webhook", async (req, res) => {
       }
 
       const result = detectDailyStructure(candles);
+        const keyLevelSummary = {
+  active: result.trackedKeyLevels.filter(
+    level => level.status === "ACTIVE"
+  ).length,
+
+  reacted: result.trackedKeyLevels.filter(
+    level => level.status === "REACTED"
+  ).length,
+
+  invalidated: result.trackedKeyLevels.filter(
+    level => level.status === "INVALIDATED"
+  ).length
+};
+
+const keyLevelSummaryText =
+  `<b>DAILY KEY-LEVEL SUMMARY</b>\n` +
+  `🟢 Active: ${keyLevelSummary.active}\n` +
+  `🔵 Reacted: ${keyLevelSummary.reacted}\n` +
+  `🔴 Invalidated: ${keyLevelSummary.invalidated}\n\n`;
         const statusText = ["ACTIVE", "REACTED", "INVALIDATED"]
   .map(status => {
     const levels = result.trackedKeyLevels
@@ -1098,6 +1117,7 @@ app.post("/webhook", async (req, res) => {
         `${describeStructure(result.bullishHH, "HH")}\n` +
         `Pending HL: ${describeSwing(result.pendingHL)}\n` +
         `Protected HL: ${describeSwing(result.protectedHL)}\n\n` +
+        `${keyLevelSummaryText}` +
         `<b>DAILY KEY-LEVEL STATUS</b>\n${statusText}\n\n` +
         `<b>DAILY KEY-LEVEL REACTIONS</b>\n${reactionText}\n\n` +
         `<b>RECENT EVENTS</b>\n${eventText}\n\n` +
