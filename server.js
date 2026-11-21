@@ -1011,24 +1011,27 @@ app.post("/webhook", async (req, res) => {
       .filter(level => level.status === status)
       .slice(-10);
 
-    const details = levels.length
-      levels.map(level => {
-  const eventDate =
-    status === "REACTED"
-      ? level.reaction?.date
-      : status === "INVALIDATED"
-        ? level.invalidation?.date
-        : null;
+    let details = "None";
 
-  return (
-    `• ${level.type}\n` +
-    `  Bias: ${level.bias} | Formed: ${level.second_candle}\n` +
-    (eventDate ? `  ${status} DATE: ${eventDate}\n` : "") +
-    `  Zone: ${level.low} – ${level.high}`
-  );
-}).join("\n")
-      : "None";
-return `<b>${status} LEVELS</b>\n${details}`;
+    if (levels.length > 0) {
+      details = levels.map(level => {
+        const eventDate =
+          status === "REACTED"
+            ? level.reaction?.date
+            : status === "INVALIDATED"
+              ? level.invalidation?.date
+              : null;
+
+        return (
+          `• ${level.type}\n` +
+          `  Bias: ${level.bias} | Formed: ${level.second_candle}\n` +
+          (eventDate ? `  ${status} DATE: ${eventDate}\n` : "") +
+          `  Zone: ${level.low} – ${level.high}`
+        );
+      }).join("\n");
+    }
+
+    return `<b>${status} LEVELS</b>\n${details}`;
   })
   .join("\n\n");
         const reactionText = result.keyLevelReactions.length
