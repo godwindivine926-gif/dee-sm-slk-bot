@@ -1799,6 +1799,51 @@ const eboLine = w1ToD1Ebo
   ? `<b>H4 INT breakout broke ${d1LevelType} @ ${formatPrice(w1ToD1Ebo.close)}</b>\n· closed ${w1ToD1Ebo.date}\n\n`
   : "";
 
+const formatBreakDate12h = (rawDate) => {
+  if (!rawDate) return "N/A";
+  const str = String(rawDate).trim();
+  const match = str.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{1,2}):(\d{2})(?::\d{2})?/);
+  if (!match) return str;
+
+  const [, datePart, hourRaw, minutePart] = match;
+  let hour = Number(hourRaw);
+  const ampm = hour >= 12 ? "PM" : "AM";
+  hour = hour % 12;
+  if (hour === 0) hour = 12;
+
+  return `${datePart} ${hour}:${minutePart} ${ampm} WAT`;
+};
+
+const findH4BreakoutDatetime = (h4Candles, ebo, bias) => {
+  if (!ebo || !ebo.date || !Array.isArray(h4Candles) || h4Candles.length === 0) {
+    return ebo?.date || "N/A";
+  }
+
+  const eboDateStr = String(ebo.date).slice(0, 10);
+  const level = Number(ebo.broken_pullback_level);
+
+  const matchedCandle = h4Candles.find((c) => {
+    const cDateStr = String(c.datetime || "").slice(0, 10);
+    if (cDateStr < eboDateStr) return false;
+
+    const cClose = Number(c.close);
+    if (Number.isNaN(cClose) || Number.isNaN(level)) return false;
+
+    if (bias === "BEARISH") return cClose < level;
+    if (bias === "BULLISH") return cClose > level;
+    return false;
+  });
+
+  return matchedCandle?.datetime || ebo.date;
+};
+
+const h4CandlesList = typeof h4Candles !== "undefined" ? h4Candles : [];
+const h4BreakTimeRaw = findH4BreakoutDatetime(h4CandlesList, w1ToD1Ebo, d1Bias);
+
+const eboLine = w1ToD1Ebo
+  ? `<b>H4 INT breakout broke ${d1LevelType} @ ${formatPrice(w1ToD1Ebo.close)}</b>\n· closed ${formatBreakDate12h(h4BreakTimeRaw)}\n\n`
+  : "";
+                  
 const msg =
   `${storylineEmoji} <b>${storylineDir} STORYLINE CONFIRMED —</b>\n` +
   `<b>${symbol} · D1 > H4</b>\n` +
