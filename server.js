@@ -650,12 +650,14 @@ function detectDailyStructure(candles) {
     // =====================================
 
     if (direction === "BULLISH" && !bullishKeyLevelReached) {
-      const touchedLevel = keyLevels.find(level =>
-        level.bias === "BULLISH" &&
-        level.formation_index < i &&
-        high >= level.low &&
-        low <= level.high
-      );
+      const touchedLevel = keyLevels
+  .filter(level =>
+    level.bias === "BULLISH" &&
+    level.formation_index < i &&
+    high >= level.low &&
+    low <= level.high
+  )
+  .sort((a, b) => b.formation_index - a.formation_index)[0];
 
       if (touchedLevel) {
         bullishKeyLevelReached = true;
@@ -683,12 +685,14 @@ function detectDailyStructure(candles) {
     // =====================================
 
     if (direction === "BEARISH" && !bearishKeyLevelReached) {
-      const touchedLevel = keyLevels.find(level =>
-        level.bias === "BEARISH" &&
-        level.formation_index < i &&
-        high >= level.low &&
-        low <= level.high
-      );
+      const touchedLevel = keyLevels
+  .filter(level =>
+    level.bias === "BEARISH" &&
+    level.formation_index < i &&
+    high >= level.low &&
+    low <= level.high
+  )
+  .sort((a, b) => b.formation_index - a.formation_index)[0];
 
       if (touchedLevel) {
         bearishKeyLevelReached = true;
@@ -742,16 +746,17 @@ function detectDailyStructure(candles) {
     // =====================================
 
     if (
-      protectedHL &&
-      i > protectedHL.index &&
-      close < protectedHL.level
+  bearishKeyLevelReached &&
+  bearishKeyLevelContact?.protected_lh &&
+  i > bearishKeyLevelContact.protected_lh.index &&
+  close > bearishKeyLevelContact.protected_lh.level
     ) {
       events.push({
         type: "BEARISH_EBO",
         date: candle.datetime,
         close,
-        broken_level: protectedHL.level,
-        protected_hl_date: protectedHL.date
+        broken_level: protectedLH.level,
+protected_lh_date: protectedLH.date
       });
 
       protectedHL = null;
@@ -763,16 +768,17 @@ function detectDailyStructure(candles) {
     // =====================================
 
     if (
-      protectedLH &&
-      i > protectedLH.index &&
-      close > protectedLH.level
+  bullishKeyLevelReached &&
+  bullishKeyLevelContact?.protected_hl &&
+  i > bullishKeyLevelContact.protected_hl.index &&
+  close < bullishKeyLevelContact.protected_hl.level
     ) {
       events.push({
         type: "BULLISH_EBO",
         date: candle.datetime,
         close,
-        broken_level: protectedLH.level,
-        protected_lh_date: protectedLH.date
+        broken_level: bullishKeyLevelContact.protected_hl.level,
+protected_hl_date: bullishKeyLevelContact.protected_hl.date
       });
 
       protectedLH = null;
