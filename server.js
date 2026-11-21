@@ -1614,16 +1614,7 @@ app.post("/webhook", async (req, res) => {
       const d1Bias = d1Structure?.direction && d1Structure.direction !== "UNCONFIRMED"
         ? d1Structure.direction
         : "NEUTRAL";
-                        const w1Storyline = w1Candles.length >= 2 ? detectWeeklyStoryline(w1Candles) : null;
-      const d1Structure = d1Candles.length >= 5 ? detectDailyStructure(d1Candles) : null;
-      const w1ToD1 = w1Candles.length >= 3 && d1Candles.length >= 5
-        ? detectWeeklyToDailyEbo(w1Candles, d1Candles)
-        : null;
-      const d1ToH4 = d1Candles.length >= 5 && h4Candles.length >= 5
-        ? detectDailyToH4Ebo(d1Candles, h4Candles)
-        : null;
-
-      console.log("LAST CANDLES:", {
+         console.log("LAST CANDLES:", {
         symbol,
         w1Last: w1Candles?.[w1Candles.length - 1],
         d1Last: d1Candles?.[d1Candles.length - 1],
