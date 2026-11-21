@@ -1607,6 +1607,18 @@ app.post("/webhook", async (req, res) => {
         d1Last: d1Candles?.[d1Candles.length - 1],
         h4Last: h4Candles?.[h4Candles.length - 1],
       });
+                        console.log("W1 CANDLES CHECK:", {
+        symbol,
+        count: w1Candles?.length || 0,
+        lastThree: (w1Candles || []).slice(-3).map(c => ({
+          datetime: c.datetime,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close
+        })),
+        w1Storyline
+      });
                   
       const w1Storyline = w1Candles.length >= 2 ? detectWeeklyStoryline(w1Candles) : null;
       const d1Structure = d1Candles.length >= 5 ? detectDailyStructure(d1Candles) : null;
