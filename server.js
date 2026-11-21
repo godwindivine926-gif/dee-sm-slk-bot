@@ -1507,7 +1507,7 @@ app.post("/webhook", async (req, res) => {
       return;
     }
 
-    if (command === "/add") {
+        if (command === "/add") {
       if (!argument) {
         await sendMessage(chatId, "Example: /add GBPUSD");
         return;
@@ -1527,12 +1527,13 @@ app.post("/webhook", async (req, res) => {
       await databaseRequest("watchlist", "POST", {
         chat_id: chatId,
         symbol,
-        active: true
+        is_active: true
       });
 
       await sendMessage(chatId, `${symbol} added.`);
       return;
-    }
+        }
+    
 
     if (command === "/remove") {
       if (!argument) {
@@ -1551,9 +1552,9 @@ app.post("/webhook", async (req, res) => {
       return;
     }
 
-    if (command === "/watchlist") {
+        if (command === "/watchlist") {
       const pairs = await databaseRequest(
-        `watchlist?chat_id=eq.${chatId}&select=symbol,active`
+        `watchlist?chat_id=eq.${chatId}&select=symbol,is_active`
       );
 
       if (!pairs.length) {
@@ -1562,28 +1563,29 @@ app.post("/webhook", async (req, res) => {
       }
 
       const list = pairs
-        .map(pair => `${pair.active ? "🟢" : "⏸"} ${pair.symbol}`)
+        .map(pair => `${pair.is_active ? "🟢" : "⏸"} ${pair.symbol}`)
         .join("\n");
 
       await sendMessage(chatId, `<b>YOUR WATCHLIST</b>\n\n${list}`);
       return;
-    }
+        }
 
-    if (command === "/pause" || command === "/resume") {
-      const active = command === "/resume";
+        if (command === "/pause" || command === "/resume") {
+      const is_active = command === "/resume";
 
       await databaseRequest(
         `watchlist?chat_id=eq.${chatId}`,
         "PATCH",
-        { active }
+        { is_active }
       );
 
       await sendMessage(
         chatId,
-        active ? "Monitoring resumed." : "Monitoring paused."
+        is_active ? "Monitoring resumed." : "Monitoring paused."
       );
       return;
-    }
+        }
+    
 
     if (command === "/check") {
             if (!argument) {
@@ -2044,9 +2046,9 @@ async function scanWatchlistOnce() {
 
   try {
     const activeRows = await databaseRequest(
-      "watchlist?active=eq.true&select=chat_id,symbol"
+      "watchlist?is_active=eq.true&select=chat_id,symbol"
     );
-
+    
     if (!Array.isArray(activeRows) || !activeRows.length) {
       hasCompletedInitialSeed = true;
       return;
