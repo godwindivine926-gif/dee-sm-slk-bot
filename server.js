@@ -1584,162 +1584,81 @@ app.post("/webhook", async (req, res) => {
       );
       return;
         }
-    
 
-    if (command === "/check") {
-            if (!argument) {
-        await sendMessage(chatId, "Example: /check GBPUSD");
-        return;
-      }
+        if (command === "/check") {
+      const symbol = normalizeSymbol(args[0] || "GBPUSD");
+      await sendMessage(chatId, `Checking <b>${symbol}</b> W1, D1 & H4 structure...`);
 
-      const symbol = normalizeSymbol(argument);
-      const lockKey = `${chatId}:${symbol}`;
+      const [rawW1, rawD1, rawH4] = await Promise.all([
+        getMarketCandles(symbol, "1week", 100),
+        getMarketCandles(symbol, "1day", 150),
+        getMarketCandles(symbol, "4h", 150)
+      ]);
 
-      if (activeChecks.has(lockKey)) {
-        await sendMessage(chatId, `Already checking ${symbol}. Please wait...`);
-        return;
-      }
+      const w1Candles = filterCompletedWeeklyCandles(rawW1).candles;
+      const d1Candles = filterCompletedDailyCandles(rawD1).candles;
+      const h4Candles = filterCompletedH4Candles(rawH4);
 
-      activeChecks.add(lockKey);
+      const w1Storyline = w1Candles.length >= 2 ? detectWeeklyStoryline(w1Candles) : null;
+      const d1Structure = d1Candles.length >= 5 ? detectDailyStructure(d1Candles) : null;
+      const w1ToD1 = w1Candles.length >= 3 && d1Candles.length >= 5
+        ? detectWeeklyToDailyEbo(w1Candles, d1Candles)
+        : null;
+      const d1ToH4 = d1Candles.length >= 5 && h4Candles.length >= 5
+        ? detectDailyToH4Ebo(d1Candles, h4Candles)
+        : null;
 
-      try {
-        await sendMessage(chatId, `Checking ${symbol} W1, D1 & H4 structure...`);
+      const w1Bias = w1Storyline?.bias && w1Storyline.bias !== "NONE" ? w1Storyline.bias : "NEUTRAL";
+      const d1Bias = d1Structure?.direction && d1Structure.direction !== "UNCONFIRMED"
+        ? d1Structure.direction
+        : "NEUTRAL";
 
-        const [rawW1, rawD1, rawH4] = await Promise.all([
-          getMarketCandles(symbol, "1week", 100),
-          getMarketCandles(symbol, "1day", 150),
-          getMarketCandles(symbol, "4h", 150)
-        ]);
+      const latestD1Date = d1Candles.length
+        ? String(d1Candles[d1Candles.length - 1].datetime).slice(0, 10)
+        : null;
+      const todayWatDate = getWatNow().toISOString().slice(0, 10);
+      const nextDayRule = latestD1Date && latestD1Date < todayWatDate ? "✅" : "⏳";
 
-        const w1Candles = filterCompletedWeeklyCandles(rawW1).candles;
-        const d1Candles = filterCompletedDailyCandles(rawD1).candles;
-        const h4Candles = filterCompletedH4Candles(rawH4);
+      const w1d1Setup = w1ToD1?.all_setups?.[w1ToD1.all_setups.length - 1] || null;
+      const d1h4Setup = d1ToH4?.all_setups?.[d1ToH4.all_setups.length - 1] || null;
 
-        if (d1Candles.length < 5) {
-          await sendMessage(chatId, "Not enough completed D1 candles.");
-          return;
-        }
+      const badge =
+        d1h4Setup?.ebo?.type?.startsWith("BULLISH") || w1d1Setup?.ebo?.type?.startsWith("BULLISH")
+          ? "🟢"
+          : d1h4Setup?.ebo?.type?.startsWith("BEARISH") || w1d1Setup?.ebo?.type?.startsWith("BEARISH")
+          ? "🔴"
+          : "⚪";
 
-        const result = detectDailyStructure(d1Candles);
-        const h4Result = h4Candles.length >= 5 ? detectH4Structure(h4Candles) : null;
-        const w1ToD1 = w1Candles.length >= 3 ? detectWeeklyToDailyEbo(w1Candles, d1Candles) : null;
-        const d1ToH4 = h4Candles.length >= 5 ? detectDailyToH4Ebo(d1Candles, h4Candles) : null;
+      const w1d1Block = w1d1Setup
+        ? `<b>W1 > D1:</b> ${w1d1Setup.htf_level_type} @ <b>${formatPrice(w1d1Setup.htf_zone.low)}</b> → ` +
+          `${w1d1Setup.ebo ? `✅ EBO @ <b>${formatPrice(w1d1Setup.ebo.broken_pullback_level)}</b>` : `⏳ Waiting pullback break`}\n` +
+          `<i>Cause ${w1d1Setup.htf_level_formed} · tapped ${w1d1Setup.htf_contact_date}</i>`
+        : `<b>W1 > D1:</b> No active setup`;
 
-        const describeProtectedSwing = swing => {
-          if (!swing) return "Not formed";
-          const conf = swing.confirmation_date ? ` (conf. ${swing.confirmation_date})` : "";
-          return `${swing.date}${conf} | Level: ${formatPrice(swing.level)}`;
-        };
+      const d1h4Block = d1h4Setup
+        ? `<b>D1 > H4:</b> ${d1h4Setup.htf_level_type} @ <b>${formatPrice(d1h4Setup.htf_zone.low)}</b> → ` +
+          `${d1h4Setup.ebo ? `✅ EBO @ <b>${formatPrice(d1h4Setup.ebo.broken_pullback_level)}</b>` : `⏳ Waiting pullback break`}\n` +
+          `<i>Cause ${d1h4Setup.htf_level_formed} · tapped ${d1h4Setup.htf_contact_date}</i>`
+        : `<b>D1 > H4:</b> No active setup`;
 
-        const describeStructure = (item, label) =>
-          item
-            ? `${label}: ${item.date} | Body level: ${formatPrice(item.level)}`
-            : `${label}: Not confirmed`;
+      const alignmentText =
+        w1Bias !== "NEUTRAL" && d1Bias !== "NEUTRAL"
+          ? `W1 ${w1Bias} · D1 ${d1Bias} — ${w1Bias === d1Bias ? "W/D ALIGNED · CONTINUATION" : "W/D CONFLICTING · REVERSAL"}`
+          : `W1 ${w1Bias} · D1 ${d1Bias}`;
 
-        const formatCascadeSetup = (title, cascadeResult) => {
-          const setup = cascadeResult?.latest_setup;
-          const allSetups = cascadeResult?.all_setups || [];
+      const msg =
+        `<b>${badge} ${symbol} — MARKET READ</b>\n\n` +
+        `${w1d1Block}\n\n` +
+        `${d1h4Block}\n\n` +
+        `${alignmentText}\n` +
+        `NEXT DAY RULE: ${nextDayRule}\n` +
+        `Sent ${formatWatTimestamp()}\n\n` +
+        `Not an entry signal — bias context only.`;
 
-          if (!setup) {
-            return `<b>${title}</b>\nNo key-level contact detected.\n\n`;
-          }
-
-          const pullbackLine = setup.pullback
-            ? `Last Pullback: ${setup.pullback.date} | Level: ${formatPrice(setup.pullback.level)}`
-            : "Last Pullback: None found";
-
-          const eboLine = setup.ebo
-            ? `✅ ${setup.ebo.type} — ${setup.ebo.date} (Close: ${formatPrice(setup.ebo.close)})`
-            : `⏳ Status: ${setup.status}`;
-
-          let latestConfirmedExtra = "";
-          if (!setup.ebo) {
-            const confirmedSetups = allSetups.filter(s => s.ebo);
-            if (confirmedSetups.length) {
-              const lastConf = confirmedSetups[confirmedSetups.length - 1];
-              latestConfirmedExtra =
-                `\nLatest Confirmed EBO: ${lastConf.ebo.type} — ${lastConf.ebo.date} ` +
-                `(Close: ${formatPrice(lastConf.ebo.close)} | Tap: ${lastConf.htf_contact_date})`;
-            }
-          }
-
-          return (
-            `<b>${title}</b>\n` +
-            `HTF Level: ${setup.htf_level_type} (${setup.htf_bias}) | Tap: ${setup.htf_contact_date}\n` +
-            `${pullbackLine}\n` +
-            `${eboLine}${latestConfirmedExtra}\n\n`
-          );
-        };
-
-        const keyLevelSummary = {
-          active: result.trackedKeyLevels.filter(level => level.status === "ACTIVE").length,
-          reacted: result.trackedKeyLevels.filter(level => level.status === "REACTED").length,
-          invalidated: result.trackedKeyLevels.filter(level => level.status === "INVALIDATED").length
-        };
-
-        const keyLevelSummaryText =
-          `<b>DAILY KEY-LEVEL SUMMARY</b>\n` +
-          `🟢 Active: ${keyLevelSummary.active}\n` +
-          `🔵 Reacted: ${keyLevelSummary.reacted}\n` +
-          `🔴 Invalidated: ${keyLevelSummary.invalidated}\n\n`;
-
-        const h4EboEvents = h4Result
-          ? h4Result.events.filter(e => e.type === "BULLISH_EBO" || e.type === "BEARISH_EBO")
-          : [];
-
-        const h4SectionText = h4Result
-          ? `<b>H4 STRUCTURE & EBO (STANDALONE)</b>\n` +
-            `Latest H4: ${h4Candles[h4Candles.length - 1].datetime} | Bias: ${h4Result.direction}\n` +
-            `H4 Protected LH: ${describeProtectedSwing(h4Result.protectedLH)}\n` +
-            `H4 Protected HL: ${describeProtectedSwing(h4Result.protectedHL)}\n` +
-            `H4 EBOs: ${
-              h4EboEvents.length
-                ? h4EboEvents
-                    .slice(-3)
-                    .map(e => `• ${e.type} — ${e.date} (Close: ${formatPrice(e.close)})`)
-                    .join("\n")
-                : "None"
-            }\n\n`
-          : "";
-
-        const recentEvents = result.events.slice(-8);
-
-        const eventText = recentEvents.length
-          ? recentEvents
-              .map(event => {
-                if (event.type === "LL_CONFIRMED") return `• LL confirmed — ${event.date}`;
-                if (event.type === "HH_CONFIRMED") return `• HH confirmed — ${event.date}`;
-                if (event.type === "PROTECTED_LH_CONFIRMED") return `• Protected LH — ${event.date}`;
-                if (event.type === "PROTECTED_HL_CONFIRMED") return `• Protected HL — ${event.date}`;
-                if (event.type === "BULLISH_EBO") return `• Bullish EBO — ${event.date}`;
-                if (event.type === "BEARISH_EBO") return `• Bearish EBO — ${event.date}`;
-                return `• ${event.type} — ${event.date}`;
-              })
-              .join("\n")
-          : "No confirmed structure events found.";
-
-        const latestCandle = d1Candles[d1Candles.length - 1];
-
-        const report =
-          `<b>${symbol} — MULTI-TIMEFRAME STRUCTURE</b>\n` +
-          `Latest completed D1: ${latestCandle.datetime}\n\n` +
-          `${formatCascadeSetup("W1 → D1 PULLBACK EBO", w1ToD1)}` +
-          `${formatCascadeSetup("D1 → H4 PULLBACK EBO", d1ToH4)}` +
-          `<b>D1 STRUCTURE</b>\n` +
-          `${describeStructure(result.bearishLL, "LL")} | Protected LH: ${describeProtectedSwing(result.protectedLH)}\n` +
-          `${describeStructure(result.bullishHH, "HH")} | Protected HL: ${describeProtectedSwing(result.protectedHL)}\n\n` +
-          `${h4SectionText}` +
-          `${keyLevelSummaryText}` +
-          `<b>RECENT D1 EVENTS</b>\n${eventText}\n\n` +
-          `<i>Structure and EBOs require completed candle-body closes.</i>`;
-
-        await sendMessage(chatId, report, buildStorylineInlineKeyboard(symbol));
-      } finally {
-        activeChecks.delete(lockKey);
-      }
+      await sendMessage(chatId, msg, buildStorylineInlineKeyboard(symbol));
       return;
-    }
-
+        }
+    
     if (command === "/weekly") {
       const now = new Date();
       const watNow = getWatNow(now);
