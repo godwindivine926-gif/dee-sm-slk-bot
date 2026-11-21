@@ -718,6 +718,8 @@ function detectDailyStructure(candles) {
 
   let bearishKeyLevelContact = null;
   let bullishKeyLevelContact = null;
+  let bearishContactIndex = null;
+  let lockedPreContactLH = null;
 
   const events = [];
 
@@ -769,13 +771,16 @@ function detectDailyStructure(candles) {
 
       if (touchedLevel) {
         bearishKeyLevelReached = true;
+        bearishContactIndex = i;
+        lockedPreContactLH = protectedLH ? { ...protectedLH } : null;
+
         bearishKeyLevelContact = {
           date: candle.datetime,
           level_type: touchedLevel.type,
           level_formed: touchedLevel.second_candle,
           level_low: touchedLevel.low,
           level_high: touchedLevel.high,
-          protected_lh: protectedLH ? { ...protectedLH } : null
+          protected_lh: lockedPreContactLH ? { ...lockedPreContactLH } : null
         };
 
         events.push({
@@ -790,7 +795,11 @@ function detectDailyStructure(candles) {
     for (const swing of formedSwings) {
       if (swing.type === "SWING_HIGH") {
         latestSwingHigh = swing;
-        if (direction === "BEARISH" && bearishLL) {
+        // Do not allow a swing formed after a bearish key-level contact to replace the locked LH
+        const afterBearishContact =
+          bearishContactIndex !== null && swing.index > bearishContactIndex;
+
+        if (direction === "BEARISH" && bearishLL && !afterBearishContact) {
           pendingLH = swing;
         }
       }
@@ -803,24 +812,27 @@ function detectDailyStructure(candles) {
       }
     }
 
-    if (
-      bearishKeyLevelReached &&
-      bearishKeyLevelContact?.protected_lh &&
-      i > bearishKeyLevelContact.protected_lh.index &&
-      close > bearishKeyLevelContact.protected_lh.level
-    ) {
-      const targetLH = bearishKeyLevelContact.protected_lh;
+    const activeProtectedLH = lockedPreContactLH || bearishKeyLevelContact?.protected_lh || protectedLH;
 
+    if (
+      activeProtectedLH &&
+      i > activeProtectedLH.index &&
+      close > activeProtectedLH.level
+    ) {
       events.push({
         type: "BEARISH_EBO",
         date: candle.datetime,
         close,
-        broken_level: targetLH.level,
-        protected_lh_date: targetLH.date
+        broken_level: activeProtectedLH.level,
+        protected_lh_date: activeProtectedLH.date
       });
 
       bearishKeyLevelReached = false;
       bearishKeyLevelContact = null;
+      bearishContactIndex = null;
+      lockedPreContactLH = null;
+      protectedLH = null;
+      pendingLH = null;
       protectedHL = null;
       pendingHL = null;
     }
@@ -847,9 +859,13 @@ function detectDailyStructure(candles) {
       pendingLH = null;
     }
 
+    const canConfirmPostContactLH =
+      bearishContactIndex === null || i <= bearishContactIndex;
+
     if (
       direction === "BEARISH" &&
       !bearishKeyLevelReached &&
+      canConfirmPostContactLH &&
       bearishLL &&
       pendingLH &&
       i > pendingLH.index &&
@@ -919,8 +935,16 @@ function detectDailyStructure(candles) {
       bullishKeyLevelReached = false;
       bullishKeyLevelContact = null;
 
-      bearishKeyLevelReached = false;
-      bearishKeyLevelContact = null;
+      // Preserve locked pre-contact LH if a bearish key-level contact occurred earlier
+      if (lockedPreContactLH) {
+        protectedLH = { ...lockedPreContactLH };
+        if (bearishKeyLevelContact) {
+          bearishKeyLevelContact.protected_lh = { ...lockedPreContactLH };
+        }
+      } else {
+        bearishKeyLevelReached = false;
+        bearishKeyLevelContact = null;
+      }
 
       events.push({
         type: "LL_CONFIRMED",
@@ -948,6 +972,8 @@ function detectDailyStructure(candles) {
       bearishLL = null;
       pendingLH = null;
       protectedLH = null;
+      lockedPreContactLH = null;
+      bearishContactIndex = null;
 
       bearishKeyLevelReached = false;
       bearishKeyLevelContact = null;
@@ -984,7 +1010,7 @@ function detectDailyStructure(candles) {
     keyLevelReactions,
     trackedKeyLevels
   };
-        }
+      }
 
 // =====================================
 // STANDALONE H4 STRUCTURE & EBO DETECTOR
