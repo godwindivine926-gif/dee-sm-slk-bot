@@ -197,12 +197,14 @@ function filterCompletedWeeklyCandles(rawCandles) {
   );
 
   return {
-    candles,
-    excludedUnfinished: rawCandles
-      .filter(candle => candle.datetime >= currentWeekDate)
-      .map(candle => candle.datetime)
-  };
-}
+  candles,
+  developing: rawCandles.filter(candle =>
+    candle.datetime >= currentWeekDate
+  ),
+  excludedUnfinished: rawCandles
+    .filter(candle => candle.datetime >= currentWeekDate)
+    .map(candle => candle.datetime)
+};
 
 // =====================================
 // TWO-CANDLE SWING DETECTOR
