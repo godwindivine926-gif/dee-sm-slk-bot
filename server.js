@@ -1600,26 +1600,7 @@ app.post("/webhook", async (req, res) => {
       const w1Candles = filterCompletedWeeklyCandles(rawW1).candles;
       const d1Candles = filterCompletedDailyCandles(rawD1).candles;
       const h4Candles = filterCompletedH4Candles(rawH4);
-                  
-      console.log("LAST CANDLES:", {
-        symbol,
-        w1Last: w1Candles?.[w1Candles.length - 1],
-        d1Last: d1Candles?.[d1Candles.length - 1],
-        h4Last: h4Candles?.[h4Candles.length - 1],
-      });
-                        console.log("W1 CANDLES CHECK:", {
-        symbol,
-        count: w1Candles?.length || 0,
-        lastThree: (w1Candles || []).slice(-3).map(c => ({
-          datetime: c.datetime,
-          open: c.open,
-          high: c.high,
-          low: c.low,
-          close: c.close
-        })),
-        w1Storyline
-      });
-                  
+                            
       const w1Storyline = w1Candles.length >= 2 ? detectWeeklyStoryline(w1Candles) : null;
       const d1Structure = d1Candles.length >= 5 ? detectDailyStructure(d1Candles) : null;
       const w1ToD1 = w1Candles.length >= 3 && d1Candles.length >= 5
@@ -1633,7 +1614,35 @@ app.post("/webhook", async (req, res) => {
       const d1Bias = d1Structure?.direction && d1Structure.direction !== "UNCONFIRMED"
         ? d1Structure.direction
         : "NEUTRAL";
+                        const w1Storyline = w1Candles.length >= 2 ? detectWeeklyStoryline(w1Candles) : null;
+      const d1Structure = d1Candles.length >= 5 ? detectDailyStructure(d1Candles) : null;
+      const w1ToD1 = w1Candles.length >= 3 && d1Candles.length >= 5
+        ? detectWeeklyToDailyEbo(w1Candles, d1Candles)
+        : null;
+      const d1ToH4 = d1Candles.length >= 5 && h4Candles.length >= 5
+        ? detectDailyToH4Ebo(d1Candles, h4Candles)
+        : null;
 
+      console.log("LAST CANDLES:", {
+        symbol,
+        w1Last: w1Candles?.[w1Candles.length - 1],
+        d1Last: d1Candles?.[d1Candles.length - 1],
+        h4Last: h4Candles?.[h4Candles.length - 1],
+      });
+
+      console.log("W1 CANDLES CHECK:", {
+        symbol,
+        count: w1Candles?.length || 0,
+        lastThree: (w1Candles || []).slice(-3).map(c => ({
+          datetime: c.datetime,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close
+        })),
+        w1Storyline
+      });
+            
       const latestD1Date = d1Candles.length
         ? String(d1Candles[d1Candles.length - 1].datetime).slice(0, 10)
         : null;
