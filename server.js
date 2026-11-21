@@ -287,6 +287,77 @@ function filterCompletedWeeklyCandles(rawCandles) {
   };
 }
 
+function getMondayUtcDate(dateStr) {
+  const dt = new Date(`${String(dateStr).slice(0, 10)}T00:00:00Z`);
+  const day = dt.getUTCDay();
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  dt.setUTCDate(dt.getUTCDate() + diffToMonday);
+  return dt.toISOString().slice(0, 10);
+}
+
+function buildWeeklyCandlesFromDaily(d1Candles = []) {
+  if (!Array.isArray(d1Candles) || d1Candles.length === 0) return [];
+
+  const groups = new Map();
+  for (const candle of d1Candles) {
+    if (!isValidOhlccCandle(candle)) continue;
+    const dateStr = String(candle.datetime).slice(0, 10);
+    const weekStart = getMondayUtcDate(dateStr);
+
+    if (!groups.has(weekStart)) {
+      groups.set(weekStart, []);
+    }
+    groups.get(weekStart).push(candle);
+  }
+
+  const weekly = [];
+  for (const [weekStart, days] of groups.entries()) {
+    const sortedDays = [...days].sort((a, b) =>
+      String(a.datetime).localeCompare(String(b.datetime))
+    );
+    const first = sortedDays[0];
+    const last = sortedDays[sortedDays.length - 1];
+
+    let high = -Infinity;
+    let low = Infinity;
+    for (const d of sortedDays) {
+      high = Math.max(high, Number(d.high));
+      low = Math.min(low, Number(d.low));
+    }
+
+    weekly.push({
+      datetime: weekStart,
+      open: String(first.open),
+      high: String(high),
+      low: String(low),
+      close: String(last.close),
+      source: "d1-fallback"
+    });
+  }
+
+  return weekly.sort((a, b) => a.datetime.localeCompare(b.datetime));
+}
+
+function mergeWeeklyCandlesWithDailyFallback(w1Candles = [], d1Candles = []) {
+  const base = Array.isArray(w1Candles) ? [...w1Candles] : [];
+  const fallbackWeekly = buildWeeklyCandlesFromDaily(d1Candles);
+  if (fallbackWeekly.length === 0) return base;
+
+  const lastW1Date = base.length > 0
+    ? String(base[base.length - 1].datetime).slice(0, 10)
+    : "";
+
+  for (const weekCandle of fallbackWeekly) {
+    if (weekCandle.datetime > lastW1Date) {
+      base.push(weekCandle);
+    }
+  }
+
+  return base.sort((a, b) =>
+    String(a.datetime).localeCompare(String(b.datetime))
+  );
+}
+
 function filterCompletedH4Candles(rawCandles) {
   const watNow = getWatNow();
   const nowIsoPrefix = watNow.toISOString().replace("T", " ").slice(0, 16);
@@ -1597,11 +1668,14 @@ app.post("/webhook", async (req, res) => {
         getMarketCandles(symbol, "4h", 150)
       ]);
                     
-      const w1Candles = filterCompletedWeeklyCandles(rawW1).candles;
-      const d1Candles = filterCompletedDailyCandles(rawD1).candles;
+            const d1Candles = filterCompletedDailyCandles(rawD1).candles;
       const h4Candles = filterCompletedH4Candles(rawH4);
-                            
-      const w1Storyline = w1Candles.length >= 2 ? detectWeeklyStoryline(w1Candles) : null;
+      const w1Candles = mergeWeeklyCandlesWithDailyFallback(
+        filterCompletedWeeklyCandles(rawW1).candles,
+        d1Candles
+      );
+                  
+     const w1Storyline = w1Candles.length >= 2 ? detectWeeklyStoryline(w1Candles) : null;
       const d1Structure = d1Candles.length >= 5 ? detectDailyStructure(d1Candles) : null;
       const w1ToD1 = w1Candles.length >= 3 && d1Candles.length >= 5
         ? detectWeeklyToDailyEbo(w1Candles, d1Candles)
