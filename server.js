@@ -357,12 +357,23 @@ function mergeWeeklyCandlesWithDailyFallback(w1Candles = [], d1Candles = []) {
   const fallbackWeekly = buildWeeklyCandlesFromDaily(d1Candles);
   if (fallbackWeekly.length === 0) return base;
 
+  const watNow = getWatNow();
+  const todayWatStr = watNow.toISOString().slice(0, 10);
+  const watDay = watNow.getUTCDay();
+  const currentWeekMonday = getMondayUtcDate(todayWatStr);
+  const isCurrentWeekClosed = watDay === 0 || watDay === 6;
+
   const lastW1Date = base.length > 0
     ? String(base[base.length - 1].datetime).slice(0, 10)
     : "";
 
   for (const weekCandle of fallbackWeekly) {
-    if (weekCandle.datetime > lastW1Date) {
+    const weekMonday = getMondayUtcDate(weekCandle.datetime);
+    const isClosedWeek =
+      weekMonday < currentWeekMonday ||
+      (weekMonday === currentWeekMonday && isCurrentWeekClosed);
+
+    if (isClosedWeek && weekCandle.datetime > lastW1Date) {
       base.push(weekCandle);
     }
   }
@@ -2013,16 +2024,15 @@ async function buildStorylineReport(rawSymbol) {
   const rawD1 = await getMarketCandles(symbol, "1day", 150);
   await new Promise(resolve => setTimeout(resolve, 8500));
   const rawH4 = await getMarketCandles(symbol, "4h", 150);
-  
 
-  const d1Candles = prepareStorylineCandles(rawD1, { excludeWeekends: true });
-  const h4Candles = prepareStorylineCandles(rawH4, { excludeWeekends: true });
+    const d1Candles = filterCompletedDailyCandles(rawD1).candles;
+  const h4Candles = filterCompletedH4Candles(rawH4);
   const mergedW1 = mergeWeeklyCandlesWithDailyFallback(
-    prepareStorylineCandles(rawW1, { excludeWeekends: false }),
+    filterCompletedWeeklyCandles(rawW1).candles,
     d1Candles
   );
   const w1Candles = prepareStorylineCandles(mergedW1, { excludeWeekends: false });
-
+  
   const w1Storyline = w1Candles.length >= 2 ? detectWeeklyStoryline(w1Candles) : null;
   const d1Structure = d1Candles.length >= 5 ? detectDailyStructure(d1Candles) : null;
   const h4Structure = h4Candles.length >= 5 ? detectH4Structure(h4Candles) : null;
