@@ -1840,6 +1840,26 @@ app.post("/webhook", async (req, res) => {
       );
       return;
         }
+
+    if (command === "/status") {
+      const uptimeMins = Math.floor(process.uptime() / 60);
+      await sendMessage(
+        chatId,
+        `🟢 <b>DEE SM SLK BOT — ONLINE</b>\n\n` +
+        `• Uptime: <code>${uptimeMins} mins</code>\n` +
+        `• Authorized IDs: <code>${ALLOWED_CHAT_IDS.length}</code>`
+      );
+      return;
+    }
+
+    if (command === "/bias" || command === "/bais") {
+      if (!argument) {
+        await sendMessage(chatId, "Example: <code>/bias GBPUSD</code> (or use <code>/weekly</code> for weekly focus)");
+        return;
+      }
+      // Re-use your existing /check logic by forwarding the argument
+      command = "/check";
+    }
     
         if (command === "/add") {
       if (!argument) {
