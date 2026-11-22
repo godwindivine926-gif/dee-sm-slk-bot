@@ -2227,8 +2227,6 @@ app.post("/webhook", async (req, res) => {
     }
 
     const message = req.body?.message;
-    
-    const message = req.body?.message;
     if (!message || !message.text) return;
 
     chatId = parseChatId(message.chat.id);
