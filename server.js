@@ -1515,7 +1515,21 @@ function prepareStorylineCandles(rawCandles, { excludeWeekends = true } = {}) {
     .sort((a, b) => String(a.datetime).localeCompare(String(b.datetime)));
 }
 
-function detectH4TapAndM30Breakout(h4Candles, m30Candles, bias = "BEARISH") {
+function detectH4TapAndM30Breakout(
+  h4Candles,
+  m30Candles,
+  bias = "BEARISH",
+  { isH4Active = true, maxH4AgeCandles = 12 } = {}
+) {
+  if (!isH4Active) {
+    return {
+      h4Ebo: null,
+      h4Tap: null,
+      m30Breakout: null,
+      status: "H4_NOT_ACTIVE"
+    };
+  }
+
   const safeH4 = prepareStorylineCandles(h4Candles, { excludeWeekends: true });
   const safeM30 = prepareStorylineCandles(m30Candles, { excludeWeekends: true });
 
@@ -1531,10 +1545,16 @@ function detectH4TapAndM30Breakout(h4Candles, m30Candles, bias = "BEARISH") {
   const h4Struct = detectH4Structure(safeH4);
   const h4KeyLevels = detectDailyKeyLevels(safeH4);
 
+  const minAllowedH4Index = Math.max(0, safeH4.length - maxH4AgeCandles);
+
   const h4EboEvent = Array.isArray(h4Struct?.events)
     ? [...h4Struct.events]
         .reverse()
-        .find(ev => ev.type === "BULLISH_EBO" || ev.type === "BEARISH_EBO")
+        .find(ev => {
+          if (ev.type !== "BULLISH_EBO" && ev.type !== "BEARISH_EBO") return false;
+          const idx = safeH4.findIndex(c => String(c.datetime) === String(ev.date));
+          return idx >= minAllowedH4Index;
+        })
     : null;
 
   if (!h4EboEvent) {
@@ -1675,8 +1695,7 @@ function detectH4TapAndM30Breakout(h4Candles, m30Candles, bias = "BEARISH") {
     m30Breakout,
     status: m30Breakout ? "M30_BREAKOUT_CONFIRMED" : "WAITING_M30_BREAKOUT"
   };
-      }
-    
+                            }
 // =====================================
 // HOME & TELEGRAM WEBHOOK (PART 1)
 // =====================================
@@ -1729,40 +1748,59 @@ app.post("/webhook", async (req, res) => {
         return;
       }
 
-      if (action === "entry") {
-  const [rawH4, rawM30] = await Promise.all([
-    getMarketCandles(symbol, "4h", 150),
-    getMarketCandles(symbol, "30min", 150)
-  ]);
+          if (action === "entry") {
+        const [rawD1, rawH4, rawM30] = await Promise.all([
+          getMarketCandles(symbol, "1day", 150),
+          getMarketCandles(symbol, "4h", 150),
+          getMarketCandles(symbol, "30min", 150)
+        ]);
 
-  const entryCheck = detectH4TapAndM30Breakout(rawH4, rawM30);
+        const d1Candles = prepareStorylineCandles(rawD1, { excludeWeekends: true });
+        const d1Struct = d1Candles.length >= 5 ? detectDailyStructure(d1Candles) : null;
+        const hasD1KeyLevelTap = Boolean(
+          d1Struct?.bearishKeyLevelContact || d1Struct?.bullishKeyLevelContact
+        );
 
-  const h4EboText = entryCheck.h4Ebo
-    ? `✅ H4 External BO @ <b>${formatPrice(entryCheck.h4Ebo.close ?? entryCheck.h4Ebo.broken_level)}</b> · ${entryCheck.h4Ebo.date}`
-    : `⏳ H4 External BO: <i>Not confirmed yet</i>`;
+        const entryCheck = detectH4TapAndM30Breakout(rawH4, rawM30, "BEARISH", {
+          isH4Active: hasD1KeyLevelTap,
+          maxH4AgeCandles: 12
+        });
 
-  const h4TapText = entryCheck.h4Tap
-    ? `✅ H4 Tap (${entryCheck.h4Tap.label}) @ <b>${formatPrice(entryCheck.h4Tap.price)}</b> · ${entryCheck.h4Tap.datetime}`
-    : entryCheck.h4Ebo
-    ? `⏳ H4 Tap: <i>Waiting for tap into H4 breakout / A-shape key level / IBO</i>`
-    : `🔒 H4 Tap: <i>Locked until H4 external BO</i>`;
+        if (entryCheck.status === "H4_NOT_ACTIVE") {
+          await sendMessage(
+            chatId,
+            `<b>${symbol} — CONFIRMATION ENTRY (30M)</b>\n\n` +
+              `🔒 <i>H4 is not active yet — waiting for D1 break & key-level tap first.</i>`
+          );
+          return;
+        }
 
-  const m30Text = entryCheck.m30Breakout
-    ? `✅ <b>30M Breakout (${entryCheck.m30Breakout.direction})</b> broke <b>${formatPrice(entryCheck.m30Breakout.level)}</b> · closed <b>${formatPrice(entryCheck.m30Breakout.close)}</b> (${entryCheck.m30Breakout.datetime})`
-    : entryCheck.h4Tap
-    ? `⏳ <b>30M Breakout:</b> <i>Watching 30m candles after H4 tap for breakout</i>`
-    : `🔒 <b>30M Breakout:</b> <i>Available once H4 external BO & H4 key-level tap occur</i>`;
+        const h4EboText = entryCheck.h4Ebo
+          ? `✅ H4 External BO @ <b>${formatPrice(entryCheck.h4Ebo.close ?? entryCheck.h4Ebo.broken_level)}</b> · ${entryCheck.h4Ebo.date}`
+          : `⏳ H4 External BO: <i>No recent H4 external BO confirmed</i>`;
 
-  await sendMessage(
-    chatId,
-    `<b>${symbol} — CONFIRMATION ENTRY (30M)</b>\n\n` +
-      `${h4EboText}\n` +
-      `${h4TapText}\n` +
-      `${m30Text}\n\n` +
-      `<i>Not an entry signal — verify candle close & risk on chart.</i>`
-  );
-  return;
-      }
+        const h4TapText = entryCheck.h4Tap
+          ? `✅ H4 Tap (${entryCheck.h4Tap.label}) @ <b>${formatPrice(entryCheck.h4Tap.price)}</b> · ${entryCheck.h4Tap.datetime}`
+          : entryCheck.h4Ebo
+          ? `⏳ H4 Tap: <i>Waiting for tap into H4 breakout / A-shape key level / IBO</i>`
+          : `🔒 H4 Tap: <i>Locked until recent H4 external BO</i>`;
+
+        const m30Text = entryCheck.m30Breakout
+          ? `✅ <b>30M Breakout (${entryCheck.m30Breakout.direction})</b> broke <b>${formatPrice(entryCheck.m30Breakout.level)}</b> · closed <b>${formatPrice(entryCheck.m30Breakout.close)}</b> (${entryCheck.m30Breakout.datetime})`
+          : entryCheck.h4Tap
+          ? `⏳ <b>30M Breakout:</b> <i>Watching 30m candles after H4 tap for breakout</i>`
+          : `🔒 <b>30M Breakout:</b> <i>Available once H4 external BO & H4 key-level tap occur</i>`;
+
+        await sendMessage(
+          chatId,
+          `<b>${symbol} — CONFIRMATION ENTRY (30M)</b>\n\n` +
+            `${h4EboText}\n` +
+            `${h4TapText}\n` +
+            `${m30Text}\n\n` +
+            `<i>Not an entry signal — verify candle close & risk on chart.</i>`
+        );
+        return;
+          }
     }
     const message = req.body?.message;
     if (!message || !message.text) return;
