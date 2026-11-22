@@ -256,43 +256,46 @@ function filterCompletedDailyCandles(rawCandles) {
 // =====================================
 // COMPLETED WEEKLY CANDLE FILTER
 // =====================================
-
-function filterCompletedWeeklyCandles(rawCandles) {
-  const watNow = getWatNow();
-
-  const currentWeekStart = new Date(watNow);
-  currentWeekStart.setUTCHours(0, 0, 0, 0);
-  currentWeekStart.setUTCDate(
-    currentWeekStart.getUTCDate() - currentWeekStart.getUTCDay()
-  );
-
-  const currentWeekDate = currentWeekStart.toISOString().slice(0, 10);
-
-  const validCandles = rawCandles
-    .filter(isValidOhlcCandle)
-    .sort((a, b) => a.datetime.localeCompare(b.datetime));
-
-  const candles = validCandles.filter(
-    candle => String(candle.datetime).slice(0, 10) < currentWeekDate
-  );
-
-  const developing = validCandles.filter(
-    candle => String(candle.datetime).slice(0, 10) >= currentWeekDate
-  );
-
-  return {
-    candles,
-    developing,
-    excludedUnfinished: developing.map(candle => candle.datetime)
-  };
-}
-
 function getMondayUtcDate(dateStr) {
   const dt = new Date(`${String(dateStr).slice(0, 10)}T00:00:00Z`);
   const day = dt.getUTCDay();
   const diffToMonday = day === 0 ? -6 : 1 - day;
   dt.setUTCDate(dt.getUTCDate() + diffToMonday);
   return dt.toISOString().slice(0, 10);
+}
+
+function filterCompletedWeeklyCandles(rawCandles) {
+  const watNow = getWatNow();
+  const todayWatStr = watNow.toISOString().slice(0, 10);
+  const watDay = watNow.getUTCDay(); // 0 = Sun, 1 = Mon ... 5 = Fri, 6 = Sat
+
+  // Current trading week started on Monday of this week
+  const currentWeekMonday = getMondayUtcDate(todayWatStr);
+
+  // If today is Mon (1) through Fri (5), the current Mon-Fri week is still developing.
+  // Once Sat (6) or Sun (0) arrives, the Mon-Fri week has closed.
+  const isCurrentWeekClosed = watDay === 0 || watDay === 6;
+
+  const validCandles = (Array.isArray(rawCandles) ? rawCandles : [])
+    .filter(isValidOhlcCandle)
+    .sort((a, b) => String(a.datetime).localeCompare(String(b.datetime)));
+
+  const candles = validCandles.filter(candle => {
+    const candleDate = String(candle.datetime).slice(0, 10);
+    const candleWeekMonday = getMondayUtcDate(candleDate);
+
+    if (candleWeekMonday < currentWeekMonday) return true;
+    if (candleWeekMonday === currentWeekMonday && isCurrentWeekClosed) return true;
+    return false;
+  });
+
+  const developing = validCandles.filter(candle => !candles.includes(candle));
+
+  return {
+    candles,
+    developing,
+    excludedUnfinished: developing.map(candle => candle.datetime)
+  };
 }
 
 function buildWeeklyCandlesFromDaily(d1Candles = []) {
@@ -310,6 +313,10 @@ function buildWeeklyCandlesFromDaily(d1Candles = []) {
       continue;
         }
     const dateStr = String(candle.datetime).slice(0, 10);
+        const dateStr = String(candle.datetime).slice(0, 10);
+    const dayOfWeek = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) continue;
+
     const weekStart = getMondayUtcDate(dateStr);
 
     if (!groups.has(weekStart)) {
