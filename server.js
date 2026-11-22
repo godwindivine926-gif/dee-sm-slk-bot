@@ -1705,11 +1705,19 @@ function detectH4TapAndM30Breakout(
 function formatBreakDate12h(rawDate) {
   if (!rawDate) return "N/A";
   const str = String(rawDate).trim();
-  const match = str.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{1,2}):(\d{2})(?::\d{2})?/);
-  if (!match) return str;
 
-  const [, datePart, hourRaw, minutePart] = match;
-  let hour = Number(hourRaw);
+  // Date-only strings (e.g., 2026-11-16) stay as date strings
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    return str;
+  }
+
+  const parsedMs = toTimestampMs(str, false);
+  if (!Number.isFinite(parsedMs)) return str;
+
+  const watDate = new Date(parsedMs + WAT_OFFSET_MS);
+  const datePart = watDate.toISOString().slice(0, 10);
+  let hour = watDate.getUTCHours();
+  const minutePart = String(watDate.getUTCMinutes()).padStart(2, "0");
   const ampm = hour >= 12 ? "PM" : "AM";
   hour = hour % 12;
   if (hour === 0) hour = 12;
@@ -1924,11 +1932,28 @@ async function buildStorylineReport(rawSymbol) {
     keyLevels: d1Structure?.keyLevels || []
   });
 
+    const tapTs = d1State.retestTap?.datetime
+    ? toTimestampMs(d1State.retestTap.datetime, false)
+    : null;
+
+  const isAtOrAfterTap = evDate => {
+    if (!tapTs || !evDate) return true;
+    const evTs = toTimestampMs(evDate, false);
+    return Number.isFinite(evTs) ? evTs >= tapTs : true;
+  };
+
   const h4ExternalEvent = Array.isArray(h4Structure?.events)
     ? [...h4Structure.events]
         .reverse()
-        .find(ev => ev.type === "BULLISH_EBO" || ev.type === "BEARISH_EBO")
+        .find(
+          ev =>
+            (ev.type === "BULLISH_EBO" || ev.type === "BEARISH_EBO") &&
+            isAtOrAfterTap(ev.date)
+        )
     : null;
+
+  const validD1H4Ebo =
+    d1h4Setup?.ebo && isAtOrAfterTap(d1h4Setup.ebo.date) ? d1h4Setup.ebo : null;
 
   const h4Confirmed =
     d1State.hasBreak && d1State.retestTap
@@ -1938,11 +1963,11 @@ async function buildStorylineReport(rawSymbol) {
             price: h4ExternalEvent.close ?? h4ExternalEvent.broken_level,
             datetime: h4ExternalEvent.date
           }
-        : d1h4Setup?.ebo
+        : validD1H4Ebo
         ? {
-            type: String(d1h4Setup.ebo.type || "H4 EBO").replace("_", " "),
-            price: d1h4Setup.ebo.close ?? d1h4Setup.ebo.broken_pullback_level,
-            datetime: d1h4Setup.ebo.date
+            type: String(validD1H4Ebo.type || "H4 EBO").replace("_", " "),
+            price: validD1H4Ebo.close ?? validD1H4Ebo.broken_pullback_level,
+            datetime: validD1H4Ebo.date
           }
         : null
       : null;
