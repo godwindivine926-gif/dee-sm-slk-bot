@@ -1705,7 +1705,7 @@ function prepareStorylineCandles(rawCandles, { excludeWeekends = true } = {}) {
     .sort((a, b) => String(a.datetime).localeCompare(String(b.datetime)));
 }
     
-  if (command === "/check") {
+if (command === "/check") {
   const rawText = message?.text || req.body?.message?.text || "";
   const parts = String(rawText).trim().split(/\s+/);
   const symbol = normalizeSymbol(parts[1] || "GBPUSD");
@@ -1782,40 +1782,17 @@ function prepareStorylineCandles(rawCandles, { excludeWeekends = true } = {}) {
         }
       : null;
 
-  const d1RetestLevel =
-    w1d1Setup?.ebo?.broken_pullback_level ??
-    d1Structure?.bearishLL?.level ??
-    d1Structure?.bullishHH?.level ??
-    null;
-
-  const h4PreTapSwing =
-    h4Bias === "BULLISH"
-      ? h4Structure?.protectedHL || null
-      : h4Structure?.protectedLH || null;
-
-  const h4PullbackSwing =
-    d1h4Setup?.pullback && Number.isFinite(Number(d1h4Setup.pullback.level))
-      ? {
-          level: Number(d1h4Setup.pullback.level),
-          index: Math.max(
-            0,
-            h4Candles.findIndex(c => String(c.datetime) === String(d1h4Setup.pullback.date))
-          )
-        }
-      : null;
-
-  const h4RetestLevel = d1h4Setup?.ebo?.broken_pullback_level ?? null;
-
   const evaluateTfStoryline = (candles, opts = {}) => {
     if (!Array.isArray(candles) || candles.length === 0) {
       return { ebo: null, ibo: null, retestTap: null, latestBreak: null, hasBreak: false };
     }
 
-    const { bias, preTapSwing, pullbackSwing, retestLevel } = opts;
+    const { bias, preTapSwing, pullbackSwing, keyLevels = [] } = opts;
     let ebo = null;
     let ibo = null;
     let retestTap = null;
 
+    // 1. External break (EBO)
     if (preTapSwing && Number.isFinite(Number(preTapSwing.level))) {
       const startIdx = Math.max(0, Number(preTapSwing.index ?? 0) + 1);
       const lvl = Number(preTapSwing.level);
@@ -1838,6 +1815,7 @@ function prepareStorylineCandles(rawCandles, { excludeWeekends = true } = {}) {
       }
     }
 
+    // 2. Internal break (IBO)
     if (pullbackSwing && Number.isFinite(Number(pullbackSwing.level))) {
       const startIdx = Math.max(ebo ? ebo.index + 1 : 0, Number(pullbackSwing.index ?? 0) + 1);
       const lvl = Number(pullbackSwing.level);
@@ -1863,17 +1841,58 @@ function prepareStorylineCandles(rawCandles, { excludeWeekends = true } = {}) {
     const latestBreak =
       ebo && ibo ? (ibo.index >= ebo.index ? ibo : ebo) : ibo || ebo || null;
 
-    const targetRetest = retestLevel ?? latestBreak?.level ?? null;
-    if (latestBreak && targetRetest != null && !Number.isNaN(Number(targetRetest))) {
-      const lvl = Number(targetRetest);
+    // 3. Tap into ANY qualifying key level (open/close, external BO, or internal BO) after the break
+    const candidateLevels = [];
+    if (Array.isArray(keyLevels)) {
+      for (const kl of keyLevels) {
+        if (!kl) continue;
+        const low = Number(kl.low ?? kl.level);
+        const high = Number(kl.high ?? kl.level);
+        if (!Number.isFinite(low) || !Number.isFinite(high)) continue;
+        candidateLevels.push({
+          label: kl.type || "KEY LEVEL",
+          low: Math.min(low, high),
+          high: Math.max(low, high),
+          price: Number(kl.level ?? kl.high ?? kl.low),
+          formedIndex: Number.isFinite(Number(kl.formation_index)) ? Number(kl.formation_index) : -1
+        });
+      }
+    }
+
+    if (ebo && Number.isFinite(Number(ebo.level))) {
+      candidateLevels.push({
+        label: "EXTERNAL BO",
+        low: Number(ebo.level),
+        high: Number(ebo.level),
+        price: Number(ebo.level),
+        formedIndex: ebo.index
+      });
+    }
+
+    if (ibo && Number.isFinite(Number(ibo.level))) {
+      candidateLevels.push({
+        label: "INTERNAL BO",
+        low: Number(ibo.level),
+        high: Number(ibo.level),
+        price: Number(ibo.level),
+        formedIndex: ibo.index
+      });
+    }
+
+    if (latestBreak && candidateLevels.length > 0) {
       for (let i = latestBreak.index + 1; i < candles.length; i++) {
         const high = Number(candles[i].high);
         const low = Number(candles[i].low);
-        if (Number.isNaN(high) || Number.isNaN(low)) continue;
+        if (!Number.isFinite(high) || !Number.isFinite(low)) continue;
 
-        if (low <= lvl && high >= lvl) {
+        const tappedLevel = candidateLevels.find(
+          kl => kl.formedIndex < i && low <= kl.high && high >= kl.low
+        );
+
+        if (tappedLevel) {
           retestTap = {
-            level: lvl,
+            label: tappedLevel.label,
+            level: tappedLevel.price,
             datetime: candles[i].datetime || candles[i].date,
             index: i
           };
@@ -1895,18 +1914,32 @@ function prepareStorylineCandles(rawCandles, { excludeWeekends = true } = {}) {
     bias: d1Bias,
     preTapSwing: d1PreTapSwing,
     pullbackSwing: d1PullbackSwing,
-    retestLevel: d1RetestLevel
+    keyLevels: d1Structure?.keyLevels || []
   });
 
-  const h4State =
+  // Check H4 breakout once D1 has broken and tapped a qualifying Daily key level
+  const h4ExternalEvent = Array.isArray(h4Structure?.events)
+    ? [...h4Structure.events]
+        .reverse()
+        .find(ev => ev.type === "BULLISH_EBO" || ev.type === "BEARISH_EBO")
+    : null;
+
+  const h4Confirmed =
     d1State.hasBreak && d1State.retestTap
-      ? evaluateTfStoryline(h4Candles, {
-          bias: h4Bias,
-          preTapSwing: h4PreTapSwing,
-          pullbackSwing: h4PullbackSwing,
-          retestLevel: h4RetestLevel
-        })
-      : { ebo: null, ibo: null, retestTap: null, latestBreak: null, hasBreak: false };
+      ? h4ExternalEvent
+        ? {
+            type: "H4 EBO",
+            price: h4ExternalEvent.close ?? h4ExternalEvent.broken_level,
+            datetime: h4ExternalEvent.date
+          }
+        : d1h4Setup?.ebo
+        ? {
+            type: String(d1h4Setup.ebo.type || "H4 EBO").replace("_", " "),
+            price: d1h4Setup.ebo.close ?? d1h4Setup.ebo.broken_pullback_level,
+            datetime: d1h4Setup.ebo.date
+          }
+        : null
+      : null;
 
   const storylineEmoji = d1Bias === "BULLISH" ? "🟢" : d1Bias === "BEARISH" ? "🔴" : "⚪";
   const storylineDir = d1Bias === "BULLISH" ? "BULLISH" : d1Bias === "BEARISH" ? "BEARISH" : "NEUTRAL";
@@ -1916,20 +1949,20 @@ function prepareStorylineCandles(rawCandles, { excludeWeekends = true } = {}) {
     : `D1 break: <i>None confirmed yet</i>`;
 
   const d1TapLine = d1State.retestTap
-    ? `D1 tap/rejection @ <b>${formatPrice(d1State.retestTap.level)}</b> · ${formatBreakDate12h(d1State.retestTap.datetime)}`
+    ? `D1 tap (${d1State.retestTap.label}) @ <b>${formatPrice(d1State.retestTap.level)}</b> · ${formatBreakDate12h(d1State.retestTap.datetime)}`
     : d1State.latestBreak
-    ? `D1 tap/rejection: <i>Waiting for return to ${d1State.latestBreak.type} (${formatPrice(d1State.latestBreak.level)})</i>`
-    : `D1 tap/rejection: <i>Pending D1 break</i>`;
+    ? `D1 tap: <i>Waiting for tap into D1 key level (open/close, external BO, or internal BO)</i>`
+    : `D1 tap: <i>Pending D1 break</i>`;
 
   const h4BreakLine =
     d1State.hasBreak && d1State.retestTap
-      ? h4State.latestBreak
-        ? `H4 ${h4State.latestBreak.type} @ <b>${formatPrice(h4State.latestBreak.close)}</b> · ${formatBreakDate12h(h4State.latestBreak.datetime)}`
-        : `H4 break: <i>Watching for H4 EBO or IBO before entries</i>`
-      : `H4 break: <i>Locked until D1 breaks & taps/rejects</i>`;
+      ? h4Confirmed
+        ? `${h4Confirmed.type} @ <b>${formatPrice(h4Confirmed.price)}</b> · ${formatBreakDate12h(h4Confirmed.datetime)}`
+        : `H4 break: <i>Watching for H4 breakout (external BO preferred)</i>`
+      : `H4 break: <i>Locked until D1 breaks & taps a key level</i>`;
 
-  const sequenceStatus = h4State.hasBreak
-    ? `<b>Status: H4 EBO/IBO confirmed — look for entries</b>`
+  const sequenceStatus = h4Confirmed
+    ? `<b>Status: H4 breakout confirmed — look for entries</b>`
     : `<b>Status: Waiting on full W1 > D1 > H4 sequence</b>`;
 
   const msg =
@@ -1945,7 +1978,7 @@ function prepareStorylineCandles(rawCandles, { excludeWeekends = true } = {}) {
 
   await sendMessage(chatId, msg, buildStorylineInlineKeyboard(symbol));
   return;
-  }
+}
     
     if (command === "/weekly") {
       const now = new Date();
