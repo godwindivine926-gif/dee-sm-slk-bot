@@ -2124,7 +2124,8 @@ const isAtOrAfterTap = evDate => {
   };
 
   function findLatestBodyBreakAfterTap(candles, bias, afterTs = null) {
-    if (!Array.isArray(candles) || candles.length < 3) return null;
+      const afterMs = afterTs === null || afterTs === undefined ? NaN : toTimestampMs(afterTs, false);
+  if (!Number.isFinite(afterMs)) return null;
     const isBull = bias === "BULLISH";
     const isBear = bias === "BEARISH";
     if (!isBull && !isBear) return null;
@@ -2172,10 +2173,8 @@ const isAtOrAfterTap = evDate => {
     for (let i = 1; i < candles.length; i++) {
       const c = candles[i];
       const dt = c.datetime || c.date;
-      if (Number.isFinite(afterTs) && dt) {
-        const cTs = toTimestampMs(dt, false);
-        if (Number.isFinite(cTs) && cTs < afterTs) continue;
-      }
+          const cTs = dt ? toTimestampMs(dt, false) : NaN;
+    if (!Number.isFinite(cTs) || cTs < afterMs) continue;
 
       const close = Number(c.close);
       if (!Number.isFinite(close)) continue;
