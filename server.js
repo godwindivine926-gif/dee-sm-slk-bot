@@ -2080,24 +2080,43 @@ async function buildStorylineReport(rawSymbol) {
     pullbackSwing: d1PullbackSwing,
     keyLevels: d1Structure?.keyLevels || []
   });
-
-    const tapTs = d1State.retestTap?.datetime
+  const breakTs = d1State?.latestBreak?.datetime
+    ? toTimestampMs(d1State.latestBreak.datetime, false)
+    : null;
+  const rawTapTs = d1State?.retestTap?.datetime
     ? toTimestampMs(d1State.retestTap.datetime, false)
     : null;
+  const tapPrice = Number(d1State?.retestTap?.price);
+  const breakLevel = Number(d1State?.latestBreak?.level ?? d1State?.latestBreak?.price);
 
-  const isAtOrAfterTap = evDate => {
+  const tapMatchesBreakDirection = !d1State?.retestTap
+    ? false
+    : (Number.isFinite(breakTs) && Number.isFinite(rawTapTs) ? rawTapTs >= breakTs : true) &&
+      (d1Bias === "BEARISH"
+        ? (!Number.isFinite(tapPrice) || !Number.isFinite(breakLevel) || tapPrice >= breakLevel)
+        : d1Bias === "BULLISH"
+          ? (!Number.isFinite(tapPrice) || !Number.isFinite(breakLevel) || tapPrice <= breakLevel)
+          : true);
+
+  const validRetestTap = tapMatchesBreakDirection ? d1State.retestTap : null;
+  
+      const tapTs = validRetestTap?.datetime
+    ? toTimestampMs(validRetestTap.datetime, false)
+    : null;
+  
+const isAtOrAfterTap = evDate => {
     if (!tapTs || !evDate) return true;
     const evTs = toTimestampMs(evDate, false);
     return Number.isFinite(evTs) ? evTs >= tapTs : true;
   };
 
-  const bodyTapDateStr = d1State.retestTap?.datetime
-    ? String(d1State.retestTap.datetime).slice(0, 10)
+    const bodyTapDateStr = validRetestTap?.datetime
+    ? String(validRetestTap.datetime).slice(0, 10)
     : null;
-  const bodyTapTs = d1State.retestTap?.datetime
-    ? toTimestampMs(d1State.retestTap.datetime, false)
+  const bodyTapTs = validRetestTap?.datetime
+    ? toTimestampMs(validRetestTap.datetime, false)
     : null;
-
+  
   const isAfterBodyTap = evDate => {
     if (!bodyTapTs || !evDate) return true;
     const evTs = toTimestampMs(evDate, false);
@@ -2185,8 +2204,8 @@ async function buildStorylineReport(rawSymbol) {
   }
 
   let h4Confirmed = null;
-  if (d1State.hasBreak && d1State.retestTap && Array.isArray(h4Candles) && h4Candles.length >= 3) {
-    h4Confirmed = findLatestBodyBreakAfterTap(h4Candles, d1Bias, bodyTapTs);
+  if (d1State.hasBreak && validRetestTap && Array.isArray(h4Candles) && bodyTapTs !== null) {
+     h4Confirmed = findLatestBodyBreakAfterTap(h4Candles, d1Bias, bodyTapTs);
   }
   
   const storylineEmoji = d1Bias === "BULLISH" ? "🟢" : d1Bias === "BEARISH" ? "🔴" : "⚪";
@@ -2196,15 +2215,15 @@ async function buildStorylineReport(rawSymbol) {
     ? `D1 ${d1State.latestBreak.type} @ <b>${formatPrice(d1State.latestBreak.close)}</b> · ${formatBreakDate12h(d1State.latestBreak.datetime)}`
     : `D1 break: <i>None confirmed yet</i>`;
 
-  const d1TapLine = d1State.retestTap
-    ? `D1 tap (${d1State.retestTap.label}) @ <b>${formatPrice(d1State.retestTap.level)}</b> · ${formatBreakDate12h(d1State.retestTap.datetime)}`
+  const d1TapLine = validRetestTap
+  ? `D1 tap (${validRetestTap.label}) @ <b>${formatPrice(validRetestTap.price)}</b> · ${formatBreakDate12h(validRetestTap.datetime)}`
     : d1State.latestBreak
     ? `D1 tap: <i>Waiting for tap into D1 key level (open/close, external BO, or internal BO)</i>`
     : `D1 tap: <i>Pending D1 break</i>`;
 
   const h4BreakLine =
-    d1State.hasBreak && d1State.retestTap
-      ? h4Confirmed
+      d1State.hasBreak && validRetestTap
+    ? h4Confirmed
         ? `${h4Confirmed.type} @ <b>${formatPrice(h4Confirmed.price)}</b> · ${formatBreakDate12h(h4Confirmed.datetime)}`
         : `H4 break: <i>Watching for H4 breakout (external BO preferred)</i>`
       : `H4 break: <i>Locked until D1 breaks & taps a key level</i>`;
@@ -2228,8 +2247,8 @@ async function buildStorylineReport(rawSymbol) {
 
   const stageText = h4Confirmed
     ? "H4 BO confirmed"
-    : d1State.retestTap
-    ? "D1 tapped · watching H4"
+      : validRetestTap
+     ? "D1 tapped · watching H4"
     : d1State.latestBreak
     ? `D1 ${d1State.latestBreak.type} · awaiting tap`
     : "Awaiting D1 break";
