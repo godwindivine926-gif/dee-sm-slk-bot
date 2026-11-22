@@ -2346,15 +2346,28 @@ app.post("/webhook", async (req, res) => {
           ? `⏳ <b>30M Breakout (${activeBias}):</b> <i>Watching 30m body closes after H4 tap</i>`
           : `🔒 <b>30M Breakout:</b> <i>Available once H4 external BO & H4 tap occur</i>`;
 
-                await sendMessage(
-          chatId,
-          `<b>${symbol} — CONFIRMATION ENTRY (30M)</b>\n\n` +
-            `${h4EboText}\n` +
-            `${h4TapText}\n` +
-            `${m30Text}\n\n` +
-            `<i>Not an entry signal — verify candle close & risk on chart.</i>`
-        );
-        return;
+                const targetSummaryLines = [
+    report.weeklyTarget
+      ? `🎯 <b>Weekly Target (${report.weeklyTarget.label}):</b> ${formatPrice(report.weeklyTarget.price)}`
+      : null,
+    report.dailyTarget
+      ? `📍 <b>Daily Intraday Target (${report.dailyTarget.label}):</b> ${formatPrice(report.dailyTarget.price)}`
+      : null
+  ].filter(Boolean);
+
+  const targetBlock = targetSummaryLines.length
+    ? `\n\n${targetSummaryLines.join("\n")}`
+    : "";
+
+  await sendMessage(
+    chatId,
+    `<b>${symbol} - CONFIRMATION ENTRY (30M)</b>\n\n` +
+    `${h4EboText}\n` +
+    `${h4TapText}\n` +
+    `${m30Text}${targetBlock}\n\n` +
+    `<i>Not an entry signal - verify candle close & risk on chart.</i>`
+  );
+    return;
       }
     }
 
@@ -2380,7 +2393,6 @@ let argument = parts[1];
       );
       return;
             }
-    
     
         if (command === "/help") {
       await sendMessage(
