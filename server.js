@@ -2214,7 +2214,7 @@ app.post("/webhook", async (req, res) => {
           ? `⏳ <b>30M Breakout (${activeBias}):</b> <i>Watching 30m body closes after H4 tap</i>`
           : `🔒 <b>30M Breakout:</b> <i>Available once H4 external BO & H4 tap occur</i>`;
 
-        await sendMessage(
+                await sendMessage(
           chatId,
           `<b>${symbol} — CONFIRMATION ENTRY (30M)</b>\n\n` +
             `${h4EboText}\n` +
@@ -2223,8 +2223,11 @@ app.post("/webhook", async (req, res) => {
             `<i>Not an entry signal — verify candle close & risk on chart.</i>`
         );
         return;
-            }
-      
+      }
+    }
+
+    const message = req.body?.message;
+    
     const message = req.body?.message;
     if (!message || !message.text) return;
 
