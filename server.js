@@ -1691,252 +1691,247 @@ app.post("/webhook", async (req, res) => {
       return;
         }
 
-                if (command === "/check") {
-      const rawText = message?.text || req.body?.message?.text || "";
-      const parts = String(rawText).trim().split(/\s+/);
-      const symbol = normalizeSymbol(parts[1] || "GBPUSD");
-      await sendMessage(chatId, `Checking <b>${symbol}</b> W1, D1 & H4 structure...`);
+  if (command === "/check") {
+  const rawText = message?.text || req.body?.message?.text || "";
+  const parts = String(rawText).trim().split(/\s+/);
+  const symbol = normalizeSymbol(parts[1] || "GBPUSD");
+  await sendMessage(chatId, `Checking <b>${symbol}</b> W1, D1 & H4 structure...`);
 
-      const [rawW1, rawD1, rawH4] = await Promise.all([
-        getMarketCandles(symbol, "1week", 100),
-        getMarketCandles(symbol, "1day", 150),
-        getMarketCandles(symbol, "4h", 150)
-      ]);
-                    
-            const d1Candles = filterCompletedDailyCandles(rawD1).candles;
-      const h4Candles = filterCompletedH4Candles(rawH4);
-      const w1Candles = mergeWeeklyCandlesWithDailyFallback(
-        filterCompletedWeeklyCandles(rawW1).candles,
-        d1Candles
-      );
-                  
-     const w1Storyline = w1Candles.length >= 2 ? detectWeeklyStoryline(w1Candles) : null;
-      const d1Structure = d1Candles.length >= 5 ? detectDailyStructure(d1Candles) : null;
-      const w1ToD1 = w1Candles.length >= 3 && d1Candles.length >= 5
-        ? detectWeeklyToDailyEbo(w1Candles, d1Candles)
-        : null;
-      const d1ToH4 = d1Candles.length >= 5 && h4Candles.length >= 5
-        ? detectDailyToH4Ebo(d1Candles, h4Candles)
-        : null;
+  const [rawW1, rawD1, rawH4] = await Promise.all([
+    getMarketCandles(symbol, "1week", 100),
+    getMarketCandles(symbol, "1day", 150),
+    getMarketCandles(symbol, "4h", 150)
+  ]);
 
-      const w1Bias = w1Storyline?.bias && w1Storyline.bias !== "NONE" ? w1Storyline.bias : "NEUTRAL";
-      const d1Bias = d1Structure?.direction && d1Structure.direction !== "UNCONFIRMED"
-        ? d1Structure.direction
-        : "NEUTRAL";
-         console.log("LAST CANDLES:", {
-        symbol,
-        w1Last: w1Candles?.[w1Candles.length - 1],
-        d1Last: d1Candles?.[d1Candles.length - 1],
-        h4Last: h4Candles?.[h4Candles.length - 1],
-      });
+  const d1Candles = prepareStorylineCandles(rawD1, { excludeWeekends: true });
+  const h4Candles = prepareStorylineCandles(rawH4, { excludeWeekends: true });
+  const mergedW1 = mergeWeeklyCandlesWithDailyFallback(
+    prepareStorylineCandles(rawW1, { excludeWeekends: false }),
+    d1Candles
+  );
+  const w1Candles = prepareStorylineCandles(mergedW1, { excludeWeekends: false });
 
-      console.log("W1 CANDLES CHECK:", {
-        symbol,
-        count: w1Candles?.length || 0,
-        lastThree: (w1Candles || []).slice(-3).map(c => ({
-          datetime: c.datetime,
-          open: c.open,
-          high: c.high,
-          low: c.low,
-          close: c.close
-        })),
-        w1Storyline
-      });
-            
-      const latestD1Date = d1Candles.length
-        ? String(d1Candles[d1Candles.length - 1].datetime).slice(0, 10)
-        : null;
-      const todayWatDate = getWatNow().toISOString().slice(0, 10);
-      const nextDayRule = latestD1Date && latestD1Date < todayWatDate ? "✅" : "⏳";
+  const w1Storyline = w1Candles.length >= 2 ? detectWeeklyStoryline(w1Candles) : null;
+  const d1Structure = d1Candles.length >= 5 ? detectDailyStructure(d1Candles) : null;
+  const h4Structure = h4Candles.length >= 5 ? detectH4Structure(h4Candles) : null;
+  const w1ToD1 = w1Candles.length >= 3 && d1Candles.length >= 5
+    ? detectWeeklyToDailyEbo(w1Candles, d1Candles)
+    : null;
+  const d1ToH4 = d1Candles.length >= 5 && h4Candles.length >= 5
+    ? detectDailyToH4Ebo(d1Candles, h4Candles)
+    : null;
 
-      const w1d1Setup = w1ToD1?.all_setups?.[w1ToD1.all_setups.length - 1] || null;
-      const d1h4Setup = d1ToH4?.all_setups?.[d1ToH4.all_setups.length - 1] || null;
+  const w1Bias = w1Storyline?.bias && w1Storyline.bias !== "NONE" ? w1Storyline.bias : "NEUTRAL";
+  const d1Bias = d1Structure?.direction && d1Structure.direction !== "UNCONFIRMED"
+    ? d1Structure.direction
+    : w1Bias;
+  const h4Bias = h4Structure?.direction && h4Structure.direction !== "UNCONFIRMED"
+    ? h4Structure.direction
+    : d1Bias;
 
-      const badge =
-        d1h4Setup?.ebo?.type?.startsWith("BULLISH") || w1d1Setup?.ebo?.type?.startsWith("BULLISH")
-          ? "🟢"
-          : d1h4Setup?.ebo?.type?.startsWith("BEARISH") || w1d1Setup?.ebo?.type?.startsWith("BEARISH")
-          ? "🔴"
-          : "⚪";
+  const formatBreakDate12h = (rawDate) => {
+    if (!rawDate) return "N/A";
+    const str = String(rawDate).trim();
+    const match = str.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{1,2}):(\d{2})(?::\d{2})?/);
+    if (!match) return str;
 
-                        const w1d1Block = w1d1Setup
-        ? `Rejected at ${w1d1Setup.htf_level_type} KL @ ${formatPrice(w1d1Setup.htf_zone.low)}.\n\n` +
-          (w1d1Setup.ebo
-            ? `<b>External BO @ ${formatPrice(w1d1Setup.ebo.broken_pullback_level)}${w1d1Setup.ebo.broken_pullback_date ? ` · ${w1d1Setup.ebo.broken_pullback_date}` : ""}</b>\n`
-            : `<i>⏳ Waiting pullback break</i>\n`) +
-          `<b>Rejected on ${w1d1Setup.htf_contact_date}</b>\n` +
-          `<b>Trend ${w1Bias !== "NEUTRAL" ? `aligned with W1 (${w1Bias})` : "neutral on W1"}</b>`
-        : `W1→D1: No active setup.`;
+    const [, datePart, hourRaw, minutePart] = match;
+    let hour = Number(hourRaw);
+    const ampm = hour >= 12 ? "PM" : "AM";
+    hour = hour % 12;
+    if (hour === 0) hour = 12;
 
-      const d1h4Block = d1h4Setup
-        ? `Rejected at ${d1h4Setup.htf_level_type} KL @ ${formatPrice(d1h4Setup.htf_zone.low)}.\n\n` +
-          (d1h4Setup.ebo
-            ? `<b>External BO @ ${formatPrice(d1h4Setup.ebo.broken_pullback_level)}${d1h4Setup.ebo.broken_pullback_date ? ` · ${d1h4Setup.ebo.broken_pullback_date}` : ""}</b>\n`
-            : `<i>⏳ Waiting pullback break</i>\n`) +
-          `<b>Rejected on ${d1h4Setup.htf_contact_date}</b>\n` +
-          `<b>Trend ${d1Bias !== "NEUTRAL" ? `aligned with D1 (${d1Bias})` : "neutral on D1"}</b>`
-        : `D1→H4: No active setup.`;
-      const useD1H4 = Boolean(d1h4Setup?.ebo);
-            const latestW1 = w1Candles?.[w1Candles.length - 1];
-      const w1Summary = w1Storyline?.formation
-        ? `W1: ${w1Storyline.formation} (${w1Storyline.bias || "NEUTRAL"}) · ${w1Storyline.reaction_date || latestW1?.datetime || ""}`
-        : `W1 close: ${latestW1?.datetime || "N/A"} (${w1Bias})`;
-
-      const d1LevelType = d1h4Setup?.htf_level_type || d1Structure?.bullish_key_level_contact?.level_type || d1Structure?.bearish_key_level_contact?.level_type || "Key Level";
-      const d1ContactDate = d1h4Setup?.htf_contact_date || d1Structure?.bullish_key_level_contact?.date || d1Structure?.bearish_key_level_contact?.date || "N/A";
-      const d1LevelPrice = d1h4Setup?.htf_zone?.low ?? d1Structure?.bullish_key_level_contact?.level_low ?? d1Structure?.bearish_key_level_contact?.level_low;
-
-      const h4StatusLine = d1h4Setup?.ebo
-        ? `✅ <b>4H aligned:</b> BO @ <b>${formatPrice(d1h4Setup.ebo.broken_pullback_level)}</b> (${d1h4Setup.ebo.date || "confirmed"})`
-        : `⏳ <b>4H not aligned yet</b> — waiting for 4H external breakout`;
-
-      const w1ToD1Ebo = w1ToD1?.latest_setup?.ebo;
-      const storylineEmoji = d1Bias === "BULLISH" ? "🟢" : "🔴";
-const storylineDir = d1Bias === "BULLISH" ? "BULLISH" : "BEARISH";
-const breakScopeLabel = d1h4Setup?.ebo ? "EXTERNAL BREAKOUT" : "INTERNAL BREAKOUT";
-
-const eboLine = w1ToD1Ebo
-  ? `<b>H4 INT breakout broke ${d1LevelType} @ ${formatPrice(w1ToD1Ebo.close)}</b>\n· closed ${w1ToD1Ebo.date}\n\n`
-  : "";
-
-const formatBreakDate12h = (rawDate) => {
-  if (!rawDate) return "N/A";
-  const str = String(rawDate).trim();
-  const match = str.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{1,2}):(\d{2})(?::\d{2})?/);
-  if (!match) return str;
-
-  const [, datePart, hourRaw, minutePart] = match;
-  let hour = Number(hourRaw);
-  const ampm = hour >= 12 ? "PM" : "AM";
-  hour = hour % 12;
-  if (hour === 0) hour = 12;
-
-  return `${datePart} ${hour}:${minutePart} ${ampm} WAT`;
-};
-
-const evaluateTfStoryline = (candles, opts = {}) => {
-  if (!Array.isArray(candles) || candles.length === 0) {
-    return { ebo: null, ibo: null, retestTap: null, latestBreak: null, hasBreak: false };
-  }
-
-  const { bias, preTapSwing, pullbackSwing, retestLevel } = opts;
-  let ebo = null;
-  let ibo = null;
-  let retestTap = null;
-
-  if (preTapSwing && Number.isFinite(Number(preTapSwing.level))) {
-    const startIdx = Math.max(0, Number(preTapSwing.index ?? 0) + 1);
-    const lvl = Number(preTapSwing.level);
-
-    for (let i = startIdx; i < candles.length; i++) {
-      const close = Number(candles[i].close);
-      if (Number.isNaN(close)) continue;
-
-      const broke = (bias === "BULLISH" && close < lvl) || (bias === "BEARISH" && close > lvl);
-      if (broke) {
-        ebo = { type: "EBO", level: lvl, close, datetime: candles[i].datetime || candles[i].date, index: i };
-        break;
-      }
-    }
-  }
-
-  if (pullbackSwing && Number.isFinite(Number(pullbackSwing.level))) {
-    const startIdx = Math.max(ebo ? ebo.index + 1 : 0, Number(pullbackSwing.index ?? 0) + 1);
-    const lvl = Number(pullbackSwing.level);
-
-    for (let i = startIdx; i < candles.length; i++) {
-      const close = Number(candles[i].close);
-      if (Number.isNaN(close)) continue;
-
-      const broke = (bias === "BULLISH" && close > lvl) || (bias === "BEARISH" && close < lvl);
-      if (broke) {
-        ibo = { type: "IBO", level: lvl, close, datetime: candles[i].datetime || candles[i].date, index: i };
-        break;
-      }
-    }
-  }
-
-  const latestBreak =
-    ebo && ibo ? (ibo.index >= ebo.index ? ibo : ebo) : ibo || ebo || null;
-
-  const targetRetest = retestLevel ?? latestBreak?.level ?? null;
-  if (latestBreak && targetRetest != null && !Number.isNaN(Number(targetRetest))) {
-    const lvl = Number(targetRetest);
-    for (let i = latestBreak.index + 1; i < candles.length; i++) {
-      const high = Number(candles[i].high);
-      const low = Number(candles[i].low);
-      if (Number.isNaN(high) || Number.isNaN(low)) continue;
-
-      if (low <= lvl && high >= lvl) {
-        retestTap = { level: lvl, datetime: candles[i].datetime || candles[i].date, index: i };
-        break;
-      }
-    }
-  }
-
-  return {
-    ebo,
-    ibo,
-    retestTap,
-    latestBreak,
-    hasBreak: Boolean(latestBreak)
+    return `${datePart} ${hour}:${minutePart} ${ampm} WAT`;
   };
-};
 
-const safeD1Candles = typeof d1Candles !== "undefined" ? d1Candles : [];
-const safeH4Candles = typeof h4Candles !== "undefined" ? h4Candles : [];
+  const latestW1 = w1Candles?.[w1Candles.length - 1];
+  const w1Summary = w1Storyline?.formation
+    ? `W1: ${w1Storyline.formation} (${w1Storyline.bias || "NEUTRAL"}) · ${formatBreakDate12h(w1Storyline.reaction_date || latestW1?.datetime)}`
+    : `W1: ${w1Bias} · ${latestW1 ? formatBreakDate12h(latestW1.datetime) : "N/A"}`;
 
-const d1State = evaluateTfStoryline(safeD1Candles, {
-  bias: typeof d1Bias !== "undefined" ? d1Bias : null,
-  preTapSwing: typeof d1PreTapSwing !== "undefined" ? d1PreTapSwing : null,
-  pullbackSwing: typeof d1PullbackSwing !== "undefined" ? d1PullbackSwing : null,
-  retestLevel: typeof d1RetestLevel !== "undefined" ? d1RetestLevel : null
-});
+  const w1d1Setup = w1ToD1?.latest_setup || null;
+  const d1h4Setup = d1ToH4?.latest_setup || null;
 
-const h4State =
-  d1State.hasBreak && d1State.retestTap
-    ? evaluateTfStoryline(safeH4Candles, {
-        bias: typeof h4Bias !== "undefined" ? h4Bias : d1Bias,
-        preTapSwing: typeof h4PreTapSwing !== "undefined" ? h4PreTapSwing : null,
-        pullbackSwing: typeof h4PullbackSwing !== "undefined" ? h4PullbackSwing : null,
-        retestLevel: typeof h4RetestLevel !== "undefined" ? h4RetestLevel : null
-      })
-    : { ebo: null, ibo: null, retestTap: null, latestBreak: null, hasBreak: false };
+  const d1PreTapSwing =
+    d1Bias === "BULLISH"
+      ? d1Structure?.bullishKeyLevelContact?.protected_hl || d1Structure?.protectedHL || null
+      : d1Structure?.bearishKeyLevelContact?.protected_lh || d1Structure?.protectedLH || null;
 
-const d1BreakLabel = d1State.latestBreak
-  ? `D1 ${d1State.latestBreak.type} @ <b>${formatPrice(d1State.latestBreak.close)}</b> · closed ${formatBreakDate12h(d1State.latestBreak.datetime)}`
-  : `D1 break: <i>Pending</i>`;
-
-const d1TapLine = d1State.retestTap
-  ? `D1 tap/rejection @ <b>${formatPrice(d1State.retestTap.level)}</b> · ${formatBreakDate12h(d1State.retestTap.datetime)}`
-  : d1State.latestBreak
-  ? `D1 tap/rejection: <i>Waiting for price to return & reject ${d1State.latestBreak.type} (${formatPrice(d1State.latestBreak.level)})</i>`
-  : `D1 tap/rejection: <i>Waiting for D1 break first</i>`;
-
-let h4Line = `H4 breakout: <i>Waiting for D1 break & rejection</i>`;
-if (d1State.hasBreak && d1State.retestTap) {
-  h4Line = h4State.latestBreak
-    ? `H4 ${h4State.latestBreak.type} @ <b>${formatPrice(h4State.latestBreak.close)}</b> · closed ${formatBreakDate12h(h4State.latestBreak.datetime)}`
-    : `H4 breakout: <i>Watching for H4 EBO or IBO before entries</i>`;
-}
-
-const readinessLine = h4State.hasBreak
-  ? `<b>Status: H4 confirmed — look for entries</b>`
-  : `<b>Status: Awaiting full D1 -> H4 sequence</b>`;                
-const msg =
-  `${storylineEmoji} <b>${storylineDir} STORYLINE CONFIRMED —</b>\n` +
-  `<b>${symbol} · D1 > H4</b>\n` +
-  `<b>${breakScopeLabel}</b>\n\n` +
-  `${d1LevelType} rejection @ ${d1LevelPrice != null ? `<b>${formatPrice(d1LevelPrice)}</b>` : "N/A"}\n` +
-  `${eboLine}` +
-  `<i>Cause level formed ${d1ContactDate || "N/A"} · tapped ${d1ContactDate || "N/A"}</i>\n` +
-  `<i>Breakout level formed ${w1ToD1Ebo?.pullback_date || "N/A"}</i>\n\n` +
-  `${w1Summary}\n\n` +
-  `Sent ${formatWatTimestamp()}\n\n` +
-  `Not an entry signal — bias context only.`;
-  await sendMessage(chatId, msg, buildStorylineInlineKeyboard(symbol));
-      return;
+  const d1PullbackSwing =
+    w1d1Setup?.pullback && Number.isFinite(Number(w1d1Setup.pullback.level))
+      ? {
+          level: Number(w1d1Setup.pullback.level),
+          index: Math.max(
+            0,
+            d1Candles.findIndex(c => String(c.datetime) === String(w1d1Setup.pullback.date))
+          )
         }
+      : null;
+
+  const d1RetestLevel =
+    w1d1Setup?.ebo?.broken_pullback_level ??
+    d1Structure?.bearishLL?.level ??
+    d1Structure?.bullishHH?.level ??
+    null;
+
+  const h4PreTapSwing =
+    h4Bias === "BULLISH"
+      ? h4Structure?.protectedHL || null
+      : h4Structure?.protectedLH || null;
+
+  const h4PullbackSwing =
+    d1h4Setup?.pullback && Number.isFinite(Number(d1h4Setup.pullback.level))
+      ? {
+          level: Number(d1h4Setup.pullback.level),
+          index: Math.max(
+            0,
+            h4Candles.findIndex(c => String(c.datetime) === String(d1h4Setup.pullback.date))
+          )
+        }
+      : null;
+
+  const h4RetestLevel = d1h4Setup?.ebo?.broken_pullback_level ?? null;
+
+  const evaluateTfStoryline = (candles, opts = {}) => {
+    if (!Array.isArray(candles) || candles.length === 0) {
+      return { ebo: null, ibo: null, retestTap: null, latestBreak: null, hasBreak: false };
+    }
+
+    const { bias, preTapSwing, pullbackSwing, retestLevel } = opts;
+    let ebo = null;
+    let ibo = null;
+    let retestTap = null;
+
+    if (preTapSwing && Number.isFinite(Number(preTapSwing.level))) {
+      const startIdx = Math.max(0, Number(preTapSwing.index ?? 0) + 1);
+      const lvl = Number(preTapSwing.level);
+
+      for (let i = startIdx; i < candles.length; i++) {
+        const close = Number(candles[i].close);
+        if (Number.isNaN(close)) continue;
+
+        const broke = (bias === "BULLISH" && close < lvl) || (bias === "BEARISH" && close > lvl);
+        if (broke) {
+          ebo = {
+            type: "EBO",
+            level: lvl,
+            close,
+            datetime: candles[i].datetime || candles[i].date,
+            index: i
+          };
+          break;
+        }
+      }
+    }
+
+    if (pullbackSwing && Number.isFinite(Number(pullbackSwing.level))) {
+      const startIdx = Math.max(ebo ? ebo.index + 1 : 0, Number(pullbackSwing.index ?? 0) + 1);
+      const lvl = Number(pullbackSwing.level);
+
+      for (let i = startIdx; i < candles.length; i++) {
+        const close = Number(candles[i].close);
+        if (Number.isNaN(close)) continue;
+
+        const broke = (bias === "BULLISH" && close > lvl) || (bias === "BEARISH" && close < lvl);
+        if (broke) {
+          ibo = {
+            type: "IBO",
+            level: lvl,
+            close,
+            datetime: candles[i].datetime || candles[i].date,
+            index: i
+          };
+          break;
+        }
+      }
+    }
+
+    const latestBreak =
+      ebo && ibo ? (ibo.index >= ebo.index ? ibo : ebo) : ibo || ebo || null;
+
+    const targetRetest = retestLevel ?? latestBreak?.level ?? null;
+    if (latestBreak && targetRetest != null && !Number.isNaN(Number(targetRetest))) {
+      const lvl = Number(targetRetest);
+      for (let i = latestBreak.index + 1; i < candles.length; i++) {
+        const high = Number(candles[i].high);
+        const low = Number(candles[i].low);
+        if (Number.isNaN(high) || Number.isNaN(low)) continue;
+
+        if (low <= lvl && high >= lvl) {
+          retestTap = {
+            level: lvl,
+            datetime: candles[i].datetime || candles[i].date,
+            index: i
+          };
+          break;
+        }
+      }
+    }
+
+    return {
+      ebo,
+      ibo,
+      retestTap,
+      latestBreak,
+      hasBreak: Boolean(latestBreak)
+    };
+  };
+
+  const d1State = evaluateTfStoryline(d1Candles, {
+    bias: d1Bias,
+    preTapSwing: d1PreTapSwing,
+    pullbackSwing: d1PullbackSwing,
+    retestLevel: d1RetestLevel
+  });
+
+  const h4State =
+    d1State.hasBreak && d1State.retestTap
+      ? evaluateTfStoryline(h4Candles, {
+          bias: h4Bias,
+          preTapSwing: h4PreTapSwing,
+          pullbackSwing: h4PullbackSwing,
+          retestLevel: h4RetestLevel
+        })
+      : { ebo: null, ibo: null, retestTap: null, latestBreak: null, hasBreak: false };
+
+  const storylineEmoji = d1Bias === "BULLISH" ? "🟢" : d1Bias === "BEARISH" ? "🔴" : "⚪";
+  const storylineDir = d1Bias === "BULLISH" ? "BULLISH" : d1Bias === "BEARISH" ? "BEARISH" : "NEUTRAL";
+
+  const d1BreakLine = d1State.latestBreak
+    ? `D1 ${d1State.latestBreak.type} @ <b>${formatPrice(d1State.latestBreak.close)}</b> · ${formatBreakDate12h(d1State.latestBreak.datetime)}`
+    : `D1 break: <i>None confirmed yet</i>`;
+
+  const d1TapLine = d1State.retestTap
+    ? `D1 tap/rejection @ <b>${formatPrice(d1State.retestTap.level)}</b> · ${formatBreakDate12h(d1State.retestTap.datetime)}`
+    : d1State.latestBreak
+    ? `D1 tap/rejection: <i>Waiting for return to ${d1State.latestBreak.type} (${formatPrice(d1State.latestBreak.level)})</i>`
+    : `D1 tap/rejection: <i>Pending D1 break</i>`;
+
+  const h4BreakLine =
+    d1State.hasBreak && d1State.retestTap
+      ? h4State.latestBreak
+        ? `H4 ${h4State.latestBreak.type} @ <b>${formatPrice(h4State.latestBreak.close)}</b> · ${formatBreakDate12h(h4State.latestBreak.datetime)}`
+        : `H4 break: <i>Watching for H4 EBO or IBO before entries</i>`
+      : `H4 break: <i>Locked until D1 breaks & taps/rejects</i>`;
+
+  const sequenceStatus = h4State.hasBreak
+    ? `<b>Status: H4 EBO/IBO confirmed — look for entries</b>`
+    : `<b>Status: Waiting on full W1 > D1 > H4 sequence</b>`;
+
+  const msg =
+    `${storylineEmoji} <b>${storylineDir} STORYLINE —</b>\n` +
+    `<b>${symbol} · W1 > D1 > H4</b>\n\n` +
+    `${w1Summary}\n` +
+    `${d1BreakLine}\n` +
+    `${d1TapLine}\n` +
+    `${h4BreakLine}\n\n` +
+    `${sequenceStatus}\n\n` +
+    `Sent ${formatWatTimestamp()}\n\n` +
+    `Not an entry signal — bias context only.`;
+
+  await sendMessage(chatId, msg, buildStorylineInlineKeyboard(symbol));
+  return;
+  }
     
     if (command === "/weekly") {
       const now = new Date();
