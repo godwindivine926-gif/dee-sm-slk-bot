@@ -1808,8 +1808,9 @@ function evaluateTfStoryline(candles, opts = {}) {
       const low = Number(kl.low ?? kl.level);
       const high = Number(kl.high ?? kl.level);
       if (!Number.isFinite(low) || !Number.isFinite(high)) continue;
-      candidateLevels.push({
+            candidateLevels.push({
         label: kl.type || "KEY LEVEL",
+        bias: kl.bias || null,
         low: Math.min(low, high),
         high: Math.max(low, high),
         price: Number(kl.level ?? kl.high ?? kl.low),
@@ -1844,11 +1845,17 @@ function evaluateTfStoryline(candles, opts = {}) {
       const low = Number(candles[i].low);
       if (!Number.isFinite(high) || !Number.isFinite(low)) continue;
 
-      const tappedLevel = candidateLevels.find(
-        kl => kl.formedIndex < i && low <= kl.high && high >= kl.low
+            const matchingLevels = candidateLevels.filter(
+        kl =>
+          kl.formedIndex < i &&
+          low <= kl.high &&
+          high >= kl.low &&
+          (!kl.bias || !bias || bias === "NEUTRAL" || kl.bias === bias)
       );
 
-      if (tappedLevel) {
+      const tappedLevel = matchingLevels[matchingLevels.length - 1] || null;
+      
+  if (tappedLevel) {
         retestTap = {
           label: tappedLevel.label,
           level: tappedLevel.price,
