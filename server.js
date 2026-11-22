@@ -1500,6 +1500,21 @@ function detectDailyToH4Ebo(d1Candles, h4Candles) {
     all_setups: setups
   };
 }
+function prepareStorylineCandles(rawCandles, { excludeWeekends = true } = {}) {
+  if (!Array.isArray(rawCandles)) return [];
+
+  return rawCandles
+    .filter(candle => {
+      if (!isValidOhlcCandle(candle)) return false;
+      if (!excludeWeekends) return true;
+
+      const datePart = String(candle.datetime).trim().slice(0, 10);
+      const day = new Date(`${datePart}T00:00:00Z`).getUTCDay();
+      return day !== 0 && day !== 6;
+    })
+    .sort((a, b) => String(a.datetime).localeCompare(String(b.datetime)));
+}
+
 function detectH4TapAndM30Breakout(h4Candles, m30Candles, bias = "BEARISH") {
   const safeH4 = prepareStorylineCandles(h4Candles, { excludeWeekends: true });
   const safeM30 = prepareStorylineCandles(m30Candles, { excludeWeekends: true });
@@ -1866,21 +1881,7 @@ app.post("/webhook", async (req, res) => {
       );
       return;
         }
-function prepareStorylineCandles(rawCandles, { excludeWeekends = true } = {}) {
-  if (!Array.isArray(rawCandles)) return [];
-
-  return rawCandles
-    .filter(candle => {
-      if (!isValidOhlcCandle(candle)) return false;
-      if (!excludeWeekends) return true;
-
-      const datePart = String(candle.datetime).trim().slice(0, 10);
-      const day = new Date(`${datePart}T00:00:00Z`).getUTCDay();
-      return day !== 0 && day !== 6;
-    })
-    .sort((a, b) => String(a.datetime).localeCompare(String(b.datetime)));
-}   
-    
+  
 if (command === "/check") {
   const rawText = message?.text || req.body?.message?.text || "";
   const parts = String(rawText).trim().split(/\s+/);
