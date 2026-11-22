@@ -1508,7 +1508,168 @@ function detectDailyToH4Ebo(d1Candles, h4Candles) {
     all_setups: setups
   };
 }
+function detectH4TapAndM30Breakout(h4Candles, m30Candles, bias = "BEARISH") {
+  const safeH4 = prepareStorylineCandles(h4Candles, { excludeWeekends: true });
+  const safeM30 = prepareStorylineCandles(m30Candles, { excludeWeekends: true });
 
+  if (safeH4.length < 3) {
+    return {
+      h4Ebo: null,
+      h4Tap: null,
+      m30Breakout: null,
+      status: "INSUFFICIENT_H4_DATA"
+    };
+  }
+
+  const h4Struct = detectH4Structure(safeH4);
+  const h4KeyLevels = detectDailyKeyLevels(safeH4);
+
+  const h4EboEvent = Array.isArray(h4Struct?.events)
+    ? [...h4Struct.events]
+        .reverse()
+        .find(ev => ev.type === "BULLISH_EBO" || ev.type === "BEARISH_EBO")
+    : null;
+
+  if (!h4EboEvent) {
+    return {
+      h4Ebo: null,
+      h4Tap: null,
+      m30Breakout: null,
+      status: "WAITING_H4_EBO"
+    };
+  }
+
+  const h4EboIndex = safeH4.findIndex(c => String(c.datetime) === String(h4EboEvent.date));
+  const startH4Idx = h4EboIndex >= 0 ? h4EboIndex + 1 : 1;
+
+  const h4Swings = identifySwings(safeH4);
+  const effectiveBias =
+    h4EboEvent.type === "BULLISH_EBO"
+      ? "BULLISH"
+      : h4EboEvent.type === "BEARISH_EBO"
+      ? "BEARISH"
+      : bias;
+
+  const candidateH4Levels = [];
+
+  if (Number.isFinite(Number(h4EboEvent.broken_level))) {
+    const lvl = Number(h4EboEvent.broken_level);
+    candidateH4Levels.push({ label: "H4 EBO LEVEL", low: lvl, high: lvl, price: lvl });
+  }
+
+  if (Number.isFinite(Number(h4EboEvent.close))) {
+    const cls = Number(h4EboEvent.close);
+    candidateH4Levels.push({ label: "H4 BREAK CLOSE", low: cls, high: cls, price: cls });
+  }
+
+  for (const kl of h4KeyLevels) {
+    if (kl.formation_index <= (h4EboIndex >= 0 ? h4EboIndex : safeH4.length - 1)) {
+      const low = Math.min(Number(kl.low), Number(kl.high));
+      const high = Math.max(Number(kl.low), Number(kl.high));
+      if (Number.isFinite(low) && Number.isFinite(high)) {
+        candidateH4Levels.push({
+          label: kl.type === "A-SHAPE" || kl.type === "V-SHAPE" ? `${kl.type} KEY LEVEL` : kl.type,
+          low,
+          high,
+          price: effectiveBias === "BEARISH" ? high : low
+        });
+      }
+    }
+  }
+
+  for (const sw of h4Swings) {
+    if (sw.index <= (h4EboIndex >= 0 ? h4EboIndex : safeH4.length - 1) && Number.isFinite(Number(sw.level))) {
+      const lvl = Number(sw.level);
+      candidateH4Levels.push({
+        label: sw.type === "SWING_HIGH" ? "H4 SWING HIGH / IBO" : "H4 SWING LOW / IBO",
+        low: lvl,
+        high: lvl,
+        price: lvl
+      });
+    }
+  }
+
+  let h4Tap = null;
+  for (let i = startH4Idx; i < safeH4.length; i++) {
+    const c = safeH4[i];
+    const high = Number(c.high);
+    const low = Number(c.low);
+    if (!Number.isFinite(high) || !Number.isFinite(low)) continue;
+
+    const matched = candidateH4Levels.find(kl => low <= kl.high && high >= kl.low);
+    if (matched) {
+      h4Tap = {
+        label: matched.label,
+        price: matched.price,
+        datetime: c.datetime,
+        index: i
+      };
+      break;
+    }
+  }
+
+  if (!h4Tap) {
+    return {
+      h4Ebo: h4EboEvent,
+      h4Tap: null,
+      m30Breakout: null,
+      status: "WAITING_H4_KEY_LEVEL_TAP"
+    };
+  }
+
+  const tapTs = toTimestampMs(h4Tap.datetime, false);
+  const postTapM30 = safeM30.filter(c => toTimestampMs(c.datetime, false) >= tapTs);
+
+  let m30Breakout = null;
+  if (postTapM30.length >= 2) {
+    let referenceLevel = null;
+    if (effectiveBias === "BEARISH") {
+      const m30SwingsLow = identifySwings(postTapM30).filter(s => s.type === "SWING_LOW");
+      referenceLevel = m30SwingsLow.length
+        ? Number(m30SwingsLow[m30SwingsLow.length - 1].level)
+        : Number(postTapM30[0].low);
+
+      for (let i = 1; i < postTapM30.length; i++) {
+        const close = Number(postTapM30[i].close);
+        if (Number.isFinite(referenceLevel) && Number.isFinite(close) && close < referenceLevel) {
+          m30Breakout = {
+            direction: "BEARISH",
+            level: referenceLevel,
+            close,
+            datetime: postTapM30[i].datetime
+          };
+          break;
+        }
+      }
+    } else {
+      const m30SwingsHigh = identifySwings(postTapM30).filter(s => s.type === "SWING_HIGH");
+      referenceLevel = m30SwingsHigh.length
+        ? Number(m30SwingsHigh[m30SwingsHigh.length - 1].level)
+        : Number(postTapM30[0].high);
+
+      for (let i = 1; i < postTapM30.length; i++) {
+        const close = Number(postTapM30[i].close);
+        if (Number.isFinite(referenceLevel) && Number.isFinite(close) && close > referenceLevel) {
+          m30Breakout = {
+            direction: "BULLISH",
+            level: referenceLevel,
+            close,
+            datetime: postTapM30[i].datetime
+          };
+          break;
+        }
+      }
+    }
+  }
+
+  return {
+    h4Ebo: h4EboEvent,
+    h4Tap,
+    m30Breakout,
+    status: m30Breakout ? "M30_BREAKOUT_CONFIRMED" : "WAITING_M30_BREAKOUT"
+  };
+      }
+    
 // =====================================
 // HOME & TELEGRAM WEBHOOK (PART 1)
 // =====================================
@@ -1562,17 +1723,40 @@ app.post("/webhook", async (req, res) => {
       }
 
       if (action === "entry") {
-        await sendMessage(
-          chatId,
-          `<b>${symbol} — CONFIRMATION ENTRY CHECKLIST</b>\n` +
-            `1. Higher-timeframe key-level tap confirmed\n` +
-            `2. Lower-timeframe pullback broken by candle-body close\n` +
-            `3. Cross-check chart structure & risk before acting`
-        );
-        return;
-      }
-    }
+  const [rawH4, rawM30] = await Promise.all([
+    getMarketCandles(symbol, "4h", 150),
+    getMarketCandles(symbol, "30min", 150)
+  ]);
 
+  const entryCheck = detectH4TapAndM30Breakout(rawH4, rawM30);
+
+  const h4EboText = entryCheck.h4Ebo
+    ? `✅ H4 External BO @ <b>${formatPrice(entryCheck.h4Ebo.close ?? entryCheck.h4Ebo.broken_level)}</b> · ${entryCheck.h4Ebo.date}`
+    : `⏳ H4 External BO: <i>Not confirmed yet</i>`;
+
+  const h4TapText = entryCheck.h4Tap
+    ? `✅ H4 Tap (${entryCheck.h4Tap.label}) @ <b>${formatPrice(entryCheck.h4Tap.price)}</b> · ${entryCheck.h4Tap.datetime}`
+    : entryCheck.h4Ebo
+    ? `⏳ H4 Tap: <i>Waiting for tap into H4 breakout / A-shape key level / IBO</i>`
+    : `🔒 H4 Tap: <i>Locked until H4 external BO</i>`;
+
+  const m30Text = entryCheck.m30Breakout
+    ? `✅ <b>30M Breakout (${entryCheck.m30Breakout.direction})</b> broke <b>${formatPrice(entryCheck.m30Breakout.level)}</b> · closed <b>${formatPrice(entryCheck.m30Breakout.close)}</b> (${entryCheck.m30Breakout.datetime})`
+    : entryCheck.h4Tap
+    ? `⏳ <b>30M Breakout:</b> <i>Watching 30m candles after H4 tap for breakout</i>`
+    : `🔒 <b>30M Breakout:</b> <i>Available once H4 external BO & H4 key-level tap occur</i>`;
+
+  await sendMessage(
+    chatId,
+    `<b>${symbol} — CONFIRMATION ENTRY (30M)</b>\n\n` +
+      `${h4EboText}\n` +
+      `${h4TapText}\n` +
+      `${m30Text}\n\n` +
+      `<i>Not an entry signal — verify candle close & risk on chart.</i>`
+  );
+  return;
+      }
+      
     const message = req.body?.message;
     if (!message || !message.text) return;
 
@@ -1704,6 +1888,20 @@ function prepareStorylineCandles(rawCandles, { excludeWeekends = true } = {}) {
     })
     .sort((a, b) => String(a.datetime).localeCompare(String(b.datetime)));
 }
+    function prepareStorylineCandles(rawCandles, { excludeWeekends = true } = {}) {
+  if (!Array.isArray(rawCandles)) return [];
+
+  return rawCandles
+    .filter(candle => {
+      if (!isValidOhlcCandle(candle)) return false;
+      if (!excludeWeekends) return true;
+
+      const datePart = String(candle.datetime).trim().slice(0, 10);
+      const day = new Date(`${datePart}T00:00:00Z`).getUTCDay();
+      return day !== 0 && day !== 6;
+    })
+    .sort((a, b) => String(a.datetime).localeCompare(String(b.datetime)));
+    }
     
 if (command === "/check") {
   const rawText = message?.text || req.body?.message?.text || "";
