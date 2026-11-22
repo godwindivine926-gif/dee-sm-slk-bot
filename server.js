@@ -2009,17 +2009,17 @@ async function buildStorylineReport(rawSymbol) {
     }
   }
   
-    if (symbol === "USD/CAD") {
-    console.log("DEBUG USD/CAD:", {
-      d1Break: d1State.latestBreak,
-      d1RetestTap: d1State.retestTap,
-      h4Events: h4Structure?.events,
-      d1h4Ebo: d1h4Setup?.ebo,
-      h4Confirmed
+  if (symbol === "USD/CAD") {
+    console.log("DEBUG USD/CAD H4:", {
+      tapDatetime: d1State.retestTap?.datetime,
+      tapDateStr,
+      currentTapTs,
+      h4SwingHighs: identifySwings(h4Candles).filter(s => s.type === "SWING_HIGH").slice(-5),
+      h4Confirmed,
+      lastFewH4: h4Candles.slice(-6).map(c => ({ dt: c.datetime, high: c.high, close: c.close }))
     });
-    }
+  }
   
-
   const storylineEmoji = d1Bias === "BULLISH" ? "🟢" : d1Bias === "BEARISH" ? "🔴" : "⚪";
   const storylineDir = d1Bias === "BULLISH" ? "BULLISH" : d1Bias === "BEARISH" ? "BEARISH" : "NEUTRAL";
 
