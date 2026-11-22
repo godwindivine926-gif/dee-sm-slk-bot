@@ -1942,32 +1942,33 @@ async function buildStorylineReport(rawSymbol) {
     return Number.isFinite(evTs) ? evTs >= tapTs : true;
   };
 
-    const tapDateStr = d1State.retestTap?.datetime
+      const bodyTapDateStr = d1State.retestTap?.datetime
     ? String(d1State.retestTap.datetime).slice(0, 10)
     : null;
-  const currentTapTs = d1State.retestTap?.datetime
+  const bodyTapTs = d1State.retestTap?.datetime
     ? toTimestampMs(d1State.retestTap.datetime, false)
     : null;
 
-  const isPostTapEvent = evDate => {
-    if (!currentTapTs || !evDate) return true;
+  const isAfterBodyTap = evDate => {
+    if (!bodyTapTs || !evDate) return true;
     const evTs = toTimestampMs(evDate, false);
-    return Number.isFinite(evTs) ? evTs >= currentTapTs : true;
+    return Number.isFinite(evTs) ? evTs >= bodyTapTs : true;
   };
 
-  let h4Confirmed = null;
-  let debugBodySwings = [];
-  let debugLastPreTapBodySwing = null;
+  function findExternalBodyBreak(candles, bias, beforeTs = null, beforeDateStr = null, afterTs = null) {
+    if (!Array.isArray(candles) || candles.length < 3) return null;
+    const isBull = bias === "BULLISH";
+    const isBear = bias === "BEARISH";
+    if (!isBull && !isBear) return null;
 
-  if (d1State.hasBreak && d1State.retestTap && Array.isArray(h4Candles) && h4Candles.length >= 3) {
-    const targetBias = d1Bias === "BULLISH" || d1Bias === "BEARISH" ? d1Bias : null;
-    const isBull = targetBias !== "BEARISH";
+    const swingHighs = [];
+    const swingLows = [];
 
-    const bodySwings = [];
-    for (let i = 1; i < h4Candles.length - 1; i++) {
-      const prev = h4Candles[i - 1];
-      const curr = h4Candles[i];
-      const next = h4Candles[i + 1];
+    for (let i = 1; i < candles.length - 1; i++) {
+      const prev = candles[i - 1];
+      const curr = candles[i];
+      const next = candles[i + 1];
+      const dt = curr.datetime || curr.date;
 
       const prevTop = Math.max(Number(prev.open), Number(prev.close));
       const currTop = Math.max(Number(curr.open), Number(curr.close));
@@ -1977,98 +1978,88 @@ async function buildStorylineReport(rawSymbol) {
       const currBot = Math.min(Number(curr.open), Number(curr.close));
       const nextBot = Math.min(Number(next.open), Number(next.close));
 
+      const swTs = toTimestampMs(dt, false);
+      const swDateStr = String(dt || "").slice(0, 10);
+      const isBeforeTap =
+        Number.isFinite(swTs) && Number.isFinite(beforeTs)
+          ? swTs < beforeTs
+          : beforeDateStr
+          ? swDateStr < beforeDateStr
+          : true;
+
       if (
         isBull &&
+        isBeforeTap &&
         Number.isFinite(prevTop) &&
         Number.isFinite(currTop) &&
         Number.isFinite(nextTop) &&
         currTop >= prevTop &&
         currTop >= nextTop
       ) {
-        bodySwings.push({
-          type: "BODY_HIGH",
-          index: i,
-          date: curr.datetime || curr.date,
-          level: currTop
-        });
+        swingHighs.push({ index: i, level: currTop, date: dt });
       }
 
       if (
-        !isBull &&
+        isBear &&
+        isBeforeTap &&
         Number.isFinite(prevBot) &&
         Number.isFinite(currBot) &&
         Number.isFinite(nextBot) &&
         currBot <= prevBot &&
         currBot <= nextBot
       ) {
-        bodySwings.push({
-          type: "BODY_LOW",
-          index: i,
-          date: curr.datetime || curr.date,
-          level: currBot
-        });
+        swingLows.push({ index: i, level: currBot, date: dt });
       }
     }
 
-    debugBodySwings = bodySwings.slice(-6);
+    const candidates = isBull ? swingHighs : swingLows;
+    if (candidates.length === 0) return null;
 
-    const preTapBodySwings = bodySwings.filter(sw => {
-      const swTs = toTimestampMs(sw.date, false);
-      if (Number.isFinite(swTs) && Number.isFinite(currentTapTs)) {
-        return swTs < currentTapTs;
+    const outerLevel = isBull
+      ? Math.max(...candidates.map(s => s.level))
+      : Math.min(...candidates.map(s => s.level));
+
+    const latestSwing = candidates[candidates.length - 1];
+    const startIdx = Math.max(1, latestSwing.index + 1);
+
+    for (let i = startIdx; i < candles.length; i++) {
+      const c = candles[i];
+      const dt = c.datetime || c.date;
+      if (Number.isFinite(afterTs) && dt) {
+        const cTs = toTimestampMs(dt, false);
+        if (Number.isFinite(cTs) && cTs < afterTs) continue;
       }
-      const swDateStr = String(sw.date || "").slice(0, 10);
-      return tapDateStr ? swDateStr < tapDateStr : true;
-    });
 
-    debugLastPreTapBodySwing =
-      preTapBodySwings.length > 0
-        ? preTapBodySwings[preTapBodySwings.length - 1]
-        : null;
+      const close = Number(c.close);
+      if (!Number.isFinite(close)) continue;
 
-    if (debugLastPreTapBodySwing) {
-      const targetLevel = Number(debugLastPreTapBodySwing.level);
-      const startIdx = Math.max(1, Number(debugLastPreTapBodySwing.index) + 1);
-
-      for (let i = startIdx; i < h4Candles.length; i++) {
-        const candle = h4Candles[i];
-        const dt = candle.datetime || candle.date;
-        if (!isPostTapEvent(dt)) continue;
-
-        const close = Number(candle.close);
-        if (!Number.isFinite(close)) continue;
-
-        const brokeByBody = isBull ? close > targetLevel : close < targetLevel;
-
-        if (brokeByBody) {
-          h4Confirmed = {
-            type: "H4 EBO",
-            price: close,
-            level: targetLevel,
-            swingDate: debugLastPreTapBodySwing.date,
-            datetime: dt
-          };
-          break;
-        }
+      const brokeExternal = isBull ? close > outerLevel : close < outerLevel;
+      if (brokeExternal) {
+        return {
+          type: "H4 EBO",
+          kind: "EXTERNAL_BO",
+          price: close,
+          level: outerLevel,
+          swingDate: latestSwing.date,
+          datetime: dt
+        };
       }
     }
+
+    return null;
+  }
+
+  let h4Confirmed = null;
+  if (d1State.hasBreak && d1State.retestTap && Array.isArray(h4Candles) && h4Candles.length >= 3) {
+    h4Confirmed = findExternalBodyBreak(
+      h4Candles,
+      d1Bias,
+      bodyTapTs,
+      bodyTapDateStr,
+      bodyTapTs
+    );
   }
   
-    if (symbol === "USD/CAD") {
-    console.log("DEBUG USD/CAD BODY:", {
-      tapDatetime: d1State.retestTap?.datetime,
-      debugBodySwings,
-      debugLastPreTapBodySwing,
-      h4Confirmed,
-      lastFewH4: h4Candles.slice(-6).map(c => ({
-        dt: c.datetime,
-        open: c.open,
-        close: c.close,
-        bodyHigh: Math.max(Number(c.open), Number(c.close)),
-        bodyLow: Math.min(Number(c.open), Number(c.close))
-      }))
-    });
-    }
   
   const storylineEmoji = d1Bias === "BULLISH" ? "🟢" : d1Bias === "BEARISH" ? "🔴" : "⚪";
   const storylineDir = d1Bias === "BULLISH" ? "BULLISH" : d1Bias === "BEARISH" ? "BEARISH" : "NEUTRAL";
