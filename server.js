@@ -1808,9 +1808,9 @@ app.post("/webhook", async (req, res) => {
     chatId = parseChatId(message.chat.id);
     const parts = message.text.trim().split(/\s+/);
 
-    const command = parts[0].split("@")[0].toLowerCase();
-    const argument = parts[1];
-
+    let command = parts[0].split("@")[0].toLowerCase();
+let argument = parts[1];
+    
             if (command === "/start") {
       await sendMessage(
         chatId,
