@@ -1836,6 +1836,22 @@ function evaluateTfStoryline(candles, opts = {}) {
   };
 }
 
+const reportCache = new Map();
+const REPORT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+async function getCachedStorylineReport(rawSymbol) {
+  const symbol = normalizeSymbol(rawSymbol || "GBPUSD");
+  const cached = reportCache.get(symbol);
+
+  if (cached && Date.now() - cached.timestamp < REPORT_CACHE_TTL_MS) {
+    return cached.report;
+  }
+
+  const report = await buildStorylineReport(symbol);
+  reportCache.set(symbol, { report, timestamp: Date.now() });
+  return report;
+}
+
 async function buildStorylineReport(rawSymbol) {
   const symbol = normalizeSymbol(rawSymbol || "GBPUSD");
 
