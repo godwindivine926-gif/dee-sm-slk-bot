@@ -1971,6 +1971,16 @@ async function buildStorylineReport(rawSymbol) {
           }
         : null
       : null;
+    if (symbol === "USD/CAD") {
+    console.log("DEBUG USD/CAD:", {
+      d1Break: d1State.latestBreak,
+      d1RetestTap: d1State.retestTap,
+      h4Events: h4Structure?.events,
+      d1h4Ebo: d1h4Setup?.ebo,
+      h4Confirmed
+    });
+    }
+  
 
   const storylineEmoji = d1Bias === "BULLISH" ? "🟢" : d1Bias === "BEARISH" ? "🔴" : "⚪";
   const storylineDir = d1Bias === "BULLISH" ? "BULLISH" : d1Bias === "BEARISH" ? "BEARISH" : "NEUTRAL";
