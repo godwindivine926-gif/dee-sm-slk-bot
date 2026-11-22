@@ -1814,35 +1814,126 @@ const formatBreakDate12h = (rawDate) => {
   return `${datePart} ${hour}:${minutePart} ${ampm} WAT`;
 };
 
-const findH4BreakoutDatetime = (h4Candles, ebo, bias) => {
-  if (!ebo || !ebo.date || !Array.isArray(h4Candles) || h4Candles.length === 0) {
-    return ebo?.date || "N/A";
+const evaluateTfStoryline = (candles, opts = {}) => {
+  if (!Array.isArray(candles) || candles.length === 0) {
+    return { ebo: null, ibo: null, retestTap: null, latestBreak: null, hasBreak: false };
   }
 
-  const eboDateStr = String(ebo.date).slice(0, 10);
-  const level = Number(ebo.broken_pullback_level);
+  const { bias, preTapSwing, pullbackSwing, retestLevel } = opts;
+  let ebo = null;
+  let ibo = null;
+  let retestTap = null;
 
-  const matchedCandle = h4Candles.find((c) => {
-    const cDateStr = String(c.datetime || "").slice(0, 10);
-    if (cDateStr < eboDateStr) return false;
+  if (preTapSwing && Number.isFinite(Number(preTapSwing.level))) {
+    const startIdx = Math.max(0, Number(preTapSwing.index ?? 0) + 1);
+    const lvl = Number(preTapSwing.level);
 
-    const cClose = Number(c.close);
-    if (Number.isNaN(cClose) || Number.isNaN(level)) return false;
+    for (let i = startIdx; i < candles.length; i++) {
+      const close = Number(candles[i].close);
+      if (Number.isNaN(close)) continue;
 
-    if (bias === "BEARISH") return cClose < level;
-    if (bias === "BULLISH") return cClose > level;
-    return false;
-  });
+      const broke = (bias === "BULLISH" && close < lvl) || (bias === "BEARISH" && close > lvl);
+      if (broke) {
+        ebo = { type: "EBO", level: lvl, close, datetime: candles[i].datetime || candles[i].date, index: i };
+        break;
+      }
+    }
+  }
 
-  return matchedCandle?.datetime || ebo.date;
+  if (pullbackSwing && Number.isFinite(Number(pullbackSwing.level))) {
+    const startIdx = Math.max(ebo ? ebo.index + 1 : 0, Number(pullbackSwing.index ?? 0) + 1);
+    const lvl = Number(pullbackSwing.level);
+
+    for (let i = startIdx; i < candles.length; i++) {
+      const close = Number(candles[i].close);
+      if (Number.isNaN(close)) continue;
+
+      const broke = (bias === "BULLISH" && close > lvl) || (bias === "BEARISH" && close < lvl);
+      if (broke) {
+        ibo = { type: "IBO", level: lvl, close, datetime: candles[i].datetime || candles[i].date, index: i };
+        break;
+      }
+    }
+  }
+
+  const latestBreak =
+    ebo && ibo ? (ibo.index >= ebo.index ? ibo : ebo) : ibo || ebo || null;
+
+  const targetRetest = retestLevel ?? latestBreak?.level ?? null;
+  if (latestBreak && targetRetest != null && !Number.isNaN(Number(targetRetest))) {
+    const lvl = Number(targetRetest);
+    for (let i = latestBreak.index + 1; i < candles.length; i++) {
+      const high = Number(candles[i].high);
+      const low = Number(candles[i].low);
+      if (Number.isNaN(high) || Number.isNaN(low)) continue;
+
+      if (low <= lvl && high >= lvl) {
+        retestTap = { level: lvl, datetime: candles[i].datetime || candles[i].date, index: i };
+        break;
+      }
+    }
+  }
+
+  return {
+    ebo,
+    ibo,
+    retestTap,
+    latestBreak,
+    hasBreak: Boolean(latestBreak)
+  };
 };
 
-const h4CandlesList = typeof h4Candles !== "undefined" ? h4Candles : [];
-const h4BreakTimeRaw = findH4BreakoutDatetime(h4CandlesList, w1ToD1Ebo, d1Bias);
+const safeD1Candles = typeof d1Candles !== "undefined" ? d1Candles : [];
+const safeH4Candles = typeof h4Candles !== "undefined" ? h4Candles : [];
 
-const eboLine = w1ToD1Ebo
-  ? `<b>H4 INT breakout broke ${d1LevelType} @ ${formatPrice(w1ToD1Ebo.close)}</b>\n· closed ${formatBreakDate12h(h4BreakTimeRaw)}\n\n`
-  : "";
+const d1State = evaluateTfStoryline(safeD1Candles, {
+  bias: typeof d1Bias !== "undefined" ? d1Bias : null,
+  preTapSwing: typeof d1PreTapSwing !== "undefined" ? d1PreTapSwing : null,
+  pullbackSwing: typeof d1PullbackSwing !== "undefined" ? d1PullbackSwing : null,
+  retestLevel: typeof d1RetestLevel !== "undefined" ? d1RetestLevel : null
+});
+
+const h4State =
+  d1State.hasBreak && d1State.retestTap
+    ? evaluateTfStoryline(safeH4Candles, {
+        bias: typeof h4Bias !== "undefined" ? h4Bias : d1Bias,
+        preTapSwing: typeof h4PreTapSwing !== "undefined" ? h4PreTapSwing : null,
+        pullbackSwing: typeof h4PullbackSwing !== "undefined" ? h4PullbackSwing : null,
+        retestLevel: typeof h4RetestLevel !== "undefined" ? h4RetestLevel : null
+      })
+    : { ebo: null, ibo: null, retestTap: null, latestBreak: null, hasBreak: false };
+
+const d1BreakLabel = d1State.latestBreak
+  ? `D1 ${d1State.latestBreak.type} @ <b>${formatPrice(d1State.latestBreak.close)}</b> · closed ${formatBreakDate12h(d1State.latestBreak.datetime)}`
+  : `D1 break: <i>Pending</i>`;
+
+const d1TapLine = d1State.retestTap
+  ? `D1 tap/rejection @ <b>${formatPrice(d1State.retestTap.level)}</b> · ${formatBreakDate12h(d1State.retestTap.datetime)}`
+  : d1State.latestBreak
+  ? `D1 tap/rejection: <i>Waiting for price to return & reject ${d1State.latestBreak.type} (${formatPrice(d1State.latestBreak.level)})</i>`
+  : `D1 tap/rejection: <i>Waiting for D1 break first</i>`;
+
+let h4Line = `H4 breakout: <i>Waiting for D1 break & rejection</i>`;
+if (d1State.hasBreak && d1State.retestTap) {
+  h4Line = h4State.latestBreak
+    ? `H4 ${h4State.latestBreak.type} @ <b>${formatPrice(h4State.latestBreak.close)}</b> · closed ${formatBreakDate12h(h4State.latestBreak.datetime)}`
+    : `H4 breakout: <i>Watching for H4 EBO or IBO before entries</i>`;
+}
+
+const readinessLine = h4State.hasBreak
+  ? `<b>Status: H4 confirmed — look for entries</b>`
+  : `<b>Status: Awaiting full D1 -> H4 sequence</b>`;
+
+const msg =
+  `${storylineEmoji} <b>${storylineDir} STORYLINE —</b>\n` +
+  `<b>${symbol} · W1 > D1 > H4</b>\n\n` +
+  `${d1BreakLabel}\n` +
+  `${d1TapLine}\n` +
+  `${h4Line}\n\n` +
+  `${w1Summary}\n` +
+  `${readinessLine}\n\n` +
+  `Sent ${formatWatTimestamp()}\n\n` +
+  `Not an entry signal — bias context only.`;
                   
 const msg =
   `${storylineEmoji} <b>${storylineDir} STORYLINE CONFIRMED —</b>\n` +
