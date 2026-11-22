@@ -1884,6 +1884,119 @@ async function getCachedStorylineReport(rawSymbol) {
   reportCache.set(symbol, { report, timestamp: Date.now() });
   return report;
 }
+function computeWeeklyTarget(w1Candles, direction, currentPrice) {
+  if (!Array.isArray(w1Candles) || w1Candles.length < 3 || !direction || direction === "NONE" || direction === "UNCLEAR") {
+    return null;
+  }
+
+  const completed = w1Candles.slice(0, -1);
+  const price = Number(currentPrice ?? w1Candles[w1Candles.length - 1]?.close);
+
+  if (direction === "BULLISH") {
+    let bestHigh = null;
+    for (let i = 1; i < completed.length - 1; i++) {
+      const prev = completed[i - 1];
+      const curr = completed[i];
+      const next = completed[i + 1];
+      const isSwingHigh = curr.high >= prev.high && curr.high >= next.high;
+      if (isSwingHigh && (!Number.isFinite(price) || curr.high > price)) {
+        bestHigh = {
+          price: curr.high,
+          date: curr.datetime || curr.date || null,
+          label: "W1 ERL High"
+        };
+      }
+    }
+    if (bestHigh) return bestHigh;
+
+    const prevWeek = completed[completed.length - 1];
+    return prevWeek ? {
+      price: prevWeek.high,
+      date: prevWeek.datetime || prevWeek.date || null,
+      label: "Prev W1 High"
+    } : null;
+  }
+
+  if (direction === "BEARISH") {
+    let bestLow = null;
+    for (let i = 1; i < completed.length - 1; i++) {
+      const prev = completed[i - 1];
+      const curr = completed[i];
+      const next = completed[i + 1];
+      const isSwingLow = curr.low <= prev.low && curr.low <= next.low;
+      if (isSwingLow && (!Number.isFinite(price) || curr.low < price)) {
+        bestLow = {
+          price: curr.low,
+          date: curr.datetime || curr.date || null,
+          label: "W1 ERL Low"
+        };
+      }
+    }
+    if (bestLow) return bestLow;
+
+    const prevWeek = completed[completed.length - 1];
+    return prevWeek ? {
+      price: prevWeek.low,
+      date: prevWeek.datetime || prevWeek.date || null,
+      label: "Prev W1 Low"
+    } : null;
+  }
+
+  return null;
+}
+
+function computeDailyIntradayTarget(d1Candles, direction, currentPrice) {
+  if (!Array.isArray(d1Candles) || d1Candles.length < 4 || !direction || direction === "NONE" || direction === "UNCLEAR") {
+    return null;
+  }
+
+  const completed = d1Candles.slice(0, -1);
+  const price = Number(currentPrice ?? d1Candles[d1Candles.length - 1]?.close);
+
+  if (direction === "BEARISH") {
+    for (let i = completed.length - 1; i >= 2; i--) {
+      const curr = completed[i];
+      const priorLow = Math.min(completed[i - 1].low, completed[i - 2].low);
+      const brokeDownBody = curr.close < priorLow;
+      if (brokeDownBody && (!Number.isFinite(price) || priorLow < price)) {
+        return {
+          price: priorLow,
+          date: completed[i - 1].datetime || completed[i - 1].date || null,
+          label: "Last D1 Breakout Low"
+        };
+      }
+    }
+    const fallbackLow = Math.min(...completed.slice(-3).map(c => c.low));
+    return Number.isFinite(fallbackLow) ? {
+      price: fallbackLow,
+      date: null,
+      label: "D1 Swing Low"
+    } : null;
+  }
+
+  if (direction === "BULLISH") {
+    for (let i = completed.length - 1; i >= 2; i--) {
+      const curr = completed[i];
+      const priorHigh = Math.max(completed[i - 1].high, completed[i - 2].high);
+      const brokeUpBody = curr.close > priorHigh;
+      if (brokeUpBody && (!Number.isFinite(price) || priorHigh > price)) {
+        return {
+          price: priorHigh,
+          date: completed[i - 1].datetime || completed[i - 1].date || null,
+          label: "Last D1 Breakout High"
+        };
+      }
+    }
+    const fallbackHigh = Math.max(...completed.slice(-3).map(c => c.high));
+    return Number.isFinite(fallbackHigh) ? {
+      price: fallbackHigh,
+      date: null,
+      label: "D1 Swing High"
+    } : null;
+  }
+
+  return null;
+}
 
 async function buildStorylineReport(rawSymbol) {
   const symbol = normalizeSymbol(rawSymbol || "GBPUSD");
@@ -1921,6 +2034,22 @@ async function buildStorylineReport(rawSymbol) {
     ? h4Structure.direction
     : d1Bias;
 
+    const activeBias = d1Bias || w1Bias;
+  const latestPrice = h4Candles?.[h4Candles.length - 1]?.close
+    ?? d1Candles?.[d1Candles.length - 1]?.close
+    ?? latestW1?.close;
+
+  const weeklyTarget = computeWeeklyTarget(w1Candles, activeBias, latestPrice);
+  const dailyTarget = computeDailyIntradayTarget(d1Candles, activeBias, latestPrice);
+
+  const weeklyTargetLine = weeklyTarget
+    ? `🎯 <b>Weekly Target (${weeklyTarget.label}):</b> ${weeklyTarget.price}`
+    : `🎯 <b>Weekly Target:</b> —`;
+
+  const dailyTargetLine = dailyTarget
+    ? `📍 <b>Daily Intraday Target (${dailyTarget.label}):</b> ${dailyTarget.price}`
+    : `📍 <b>Daily Intraday Target:</b> —`;
+  
   const latestW1 = w1Candles?.[w1Candles.length - 1];
   const w1Summary = w1Storyline?.formation
     ? `W1: ${w1Storyline.formation} (${w1Storyline.bias || "NEUTRAL"}) · ${formatBreakDate12h(w1Storyline.reaction_date || latestW1?.datetime)}`
@@ -2091,9 +2220,11 @@ async function buildStorylineReport(rawSymbol) {
     `${d1BreakLine}\n` +
     `${d1TapLine}\n` +
     `${h4BreakLine}\n\n` +
-    `${sequenceStatus}\n\n` +
-    `Sent ${formatWatTimestamp()}\n\n` +
-    `Not an entry signal — bias context only.`;
+        `${sequenceStatus}\n\n` +
+      `${weeklyTargetLine}\n` +
+      `${dailyTargetLine}\n\n` +
+      `Sent ${formatWatTimestamp()}\n\n` +
+     `Not an entry signal — bias context only.`;
 
   const stageText = h4Confirmed
     ? "H4 BO confirmed"
@@ -2105,7 +2236,7 @@ async function buildStorylineReport(rawSymbol) {
 
   const compactLine = `${storylineEmoji} <b>${symbol}</b> · W1: <code>${w1Bias}</code> · D1: <code>${d1Bias}</code> · H4: <code>${h4Bias}</code> (${stageText})`;
 
-  return { symbol, w1Bias, d1Bias, h4Bias, fullMessage, compactLine };
+    return { symbol, w1Bias, d1Bias, h4Bias, weeklyTarget, dailyTarget, fullMessage, compactLine };
 }
 
 // =====================================
