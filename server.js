@@ -1852,14 +1852,34 @@ app.post("/webhook", async (req, res) => {
       return;
     }
 
-    if (command === "/bias" || command === "/bais") {
-      if (!argument) {
-        await sendMessage(chatId, "Example: <code>/bias GBPUSD</code> (or use <code>/weekly</code> for weekly focus)");
+        if (command === "/bias" || command === "/bais") {
+      if (argument) {
+        command = "/check";
+      } else {
+        const activePairs = await databaseRequest(
+          `watchlist?chat_id=eq.${chatId}&is_active=eq.true`
+        );
+
+        if (!activePairs || activePairs.length === 0) {
+          await sendMessage(chatId, "Your watchlist is empty. Add a pair first with <code>/add GBPUSD</code>.");
+          return;
+        }
+
+        await sendMessage(
+          chatId,
+          `📊 <b>Scanning Bias (${activePairs.length} active pair${activePairs.length > 1 ? "s" : ""})...</b>`
+        );
+
+        for (const item of activePairs) {
+          const sym = normalizeSymbol(item.symbol);
+          // Reuse your existing check/analysis handler for each symbol
+          argument = sym;
+          command = "/check";
+          // If your /check handler is right below or inside a function, call it here
+        }
         return;
       }
-      // Re-use your existing /check logic by forwarding the argument
-      command = "/check";
-    }
+        }
     
         if (command === "/add") {
       if (!argument) {
