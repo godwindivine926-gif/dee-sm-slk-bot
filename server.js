@@ -2282,43 +2282,57 @@ if (command === "/check") {
 }
       
     if (command === "/weekly") {
-      const now = new Date();
-      const watNow = getWatNow(now);
+  const now = new Date();
+  const watNow = typeof getWatNow === "function" ? (getWatNow(now) || now) : now;
+  const watDay = watNow.getUTCDay(); // 0 = Sun, 1 = Mon ... 5 = Fri, 6 = Sat
 
-      const thisSunday = new Date(watNow);
-      thisSunday.setUTCDate(watNow.getUTCDate() - watNow.getUTCDay());
-      thisSunday.setUTCHours(0, 0, 0, 0);
+  // Monday of the current week in WAT (00:00:00 WAT)
+  const currentWeekMondayWat = new Date(watNow);
+  const diffToMonday = watDay === 0 ? -6 : 1 - watDay;
+  currentWeekMondayWat.setUTCDate(watNow.getUTCDate() + diffToMonday);
+  currentWeekMondayWat.setUTCHours(0, 0, 0, 0);
 
-      const previousSunday = new Date(thisSunday);
-      previousSunday.setUTCDate(previousSunday.getUTCDate() - 7);
+  // If today is Saturday (6) or Sunday (0), the most recently completed Mon-Fri week
+  // is this week's Mon-Fri. Otherwise (Mon-Fri), it is the prior week's Mon-Fri.
+  const targetWeekMondayWat = new Date(currentWeekMondayWat);
+  if (watDay !== 0 && watDay !== 6) {
+    targetWeekMondayWat.setUTCDate(targetWeekMondayWat.getUTCDate() - 7);
+  }
 
-      const previousSaturdayEnd = new Date(thisSunday.getTime() - 1);
+  // Friday 23:59:59.999 WAT of that target week (Monday + 4 days)
+  const targetWeekFridayEndWat = new Date(targetWeekMondayWat);
+  targetWeekFridayEndWat.setUTCDate(targetWeekMondayWat.getUTCDate() + 4);
+  targetWeekFridayEndWat.setUTCHours(23, 59, 59, 999);
 
-      const from = new Date(previousSunday.getTime() - WAT_OFFSET_MS).toISOString();
-      const to = new Date(previousSaturdayEnd.getTime() - WAT_OFFSET_MS).toISOString();
+  const offsetMs = typeof WAT_OFFSET_MS === "number" ? WAT_OFFSET_MS : 0;
 
-      const events = await databaseRequest(
-        `storyline_events?chat_id=eq.${chatId}` +
-          `&created_at=gte.${encodeURIComponent(from)}` +
-          `&created_at=lte.${encodeURIComponent(to)}` +
-          `&order=created_at.asc`
-      );
+  // Convert WAT boundaries back to UTC ISO strings for Supabase created_at
+  const from = new Date(targetWeekMondayWat.getTime() - offsetMs).toISOString();
+  const to = new Date(targetWeekFridayEndWat.getTime() - offsetMs).toISOString();
 
-      if (!events.length) {
-        await sendMessage(chatId, "No saved events found for last week.");
-        return;
-      }
+  const events = await databaseRequest(
+    `storyline_events?chat_id=eq.${chatId}` +
+      `&created_at=gte.${encodeURIComponent(from)}` +
+      `&created_at=lte.${encodeURIComponent(to)}` +
+      `&order=created_at.asc`
+  );
 
-      const report = events
-        .map(
-          event =>
-            `• ${event.symbol || "Market"} — ${event.event_type || event.event || "Event"}`
-        )
-        .join("\n");
+  if (!events.length) {
+    await sendMessage(chatId, "No saved events found for last week (Mon–Fri).");
+    return;
+  }
 
-      await sendMessage(chatId, `<b>LAST WEEK'S EVENTS</b>\n\n${report}`);
-      return;
+  const report = events
+    .map(
+      event =>
+        `• ${event.symbol || "Market"} — ${event.event_type || event.event || "Event"}`
+    )
+    .join("\n");
+
+  await sendMessage(chatId, `<b>LAST WEEK'S EVENTS (MON–FRI)</b>\n\n${report}`);
+  return;
     }
+    
         const lowerText = String(message?.text || req.body?.message?.text || "")
       .trim()
       .toLowerCase();
