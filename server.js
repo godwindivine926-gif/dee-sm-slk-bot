@@ -1922,19 +1922,7 @@ if (d1State.hasBreak && d1State.retestTap) {
 
 const readinessLine = h4State.hasBreak
   ? `<b>Status: H4 confirmed — look for entries</b>`
-  : `<b>Status: Awaiting full D1 -> H4 sequence</b>`;
-
-const msg =
-  `${storylineEmoji} <b>${storylineDir} STORYLINE —</b>\n` +
-  `<b>${symbol} · W1 > D1 > H4</b>\n\n` +
-  `${d1BreakLabel}\n` +
-  `${d1TapLine}\n` +
-  `${h4Line}\n\n` +
-  `${w1Summary}\n` +
-  `${readinessLine}\n\n` +
-  `Sent ${formatWatTimestamp()}\n\n` +
-  `Not an entry signal — bias context only.`;
-                  
+  : `<b>Status: Awaiting full D1 -> H4 sequence</b>`;                
 const msg =
   `${storylineEmoji} <b>${storylineDir} STORYLINE CONFIRMED —</b>\n` +
   `<b>${symbol} · D1 > H4</b>\n` +
