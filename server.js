@@ -1942,17 +1942,17 @@ async function buildStorylineReport(rawSymbol) {
     return Number.isFinite(evTs) ? evTs >= tapTs : true;
   };
 
-    const tapDateStr = d1State.retestTap?.datetime
+      const tapDateStr = d1State.retestTap?.datetime
     ? String(d1State.retestTap.datetime).slice(0, 10)
     : null;
-  const tapTs = d1State.retestTap?.datetime
+  const currentTapTs = d1State.retestTap?.datetime
     ? toTimestampMs(d1State.retestTap.datetime, false)
     : null;
 
-  const isAtOrAfterTap = evDate => {
-    if (!tapTs || !evDate) return true;
+  const isPostTapEvent = evDate => {
+    if (!currentTapTs || !evDate) return true;
     const evTs = toTimestampMs(evDate, false);
-    return Number.isFinite(evTs) ? evTs >= tapTs : true;
+    return Number.isFinite(evTs) ? evTs >= currentTapTs : true;
   };
 
   let h4Confirmed = null;
@@ -1966,8 +1966,8 @@ async function buildStorylineReport(rawSymbol) {
       if (targetBias && sw.type !== requiredSwingType) return false;
       if (!Number.isFinite(Number(sw.level))) return false;
       const swTs = toTimestampMs(sw.date, false);
-      if (Number.isFinite(swTs) && Number.isFinite(tapTs)) {
-        return swTs < tapTs;
+      if (Number.isFinite(swTs) && Number.isFinite(currentTapTs)) {
+        return swTs < currentTapTs;
       }
       const swDateStr = String(sw.date || "").slice(0, 10);
       return tapDateStr ? swDateStr < tapDateStr : true;
@@ -1983,7 +1983,7 @@ async function buildStorylineReport(rawSymbol) {
       for (let i = startIdx; i < h4Candles.length; i++) {
         const candle = h4Candles[i];
         const dt = candle.datetime || candle.date;
-        if (!isAtOrAfterTap(dt)) continue;
+        if (!isPostTapEvent(dt)) continue;
 
         const close = Number(candle.close);
         if (!Number.isFinite(close)) continue;
