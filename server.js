@@ -1696,6 +1696,283 @@ function detectH4TapAndM30Breakout(
     status: m30Breakout ? "M30_BREAKOUT_CONFIRMED" : "WAITING_M30_BREAKOUT"
   };
                             }
+function formatBreakDate12h(rawDate) {
+  if (!rawDate) return "N/A";
+  const str = String(rawDate).trim();
+  const match = str.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{1,2}):(\d{2})(?::\d{2})?/);
+  if (!match) return str;
+
+  const [, datePart, hourRaw, minutePart] = match;
+  let hour = Number(hourRaw);
+  const ampm = hour >= 12 ? "PM" : "AM";
+  hour = hour % 12;
+  if (hour === 0) hour = 12;
+
+  return `${datePart} ${hour}:${minutePart} ${ampm} WAT`;
+}
+
+function evaluateTfStoryline(candles, opts = {}) {
+  if (!Array.isArray(candles) || candles.length === 0) {
+    return { ebo: null, ibo: null, retestTap: null, latestBreak: null, hasBreak: false };
+  }
+
+  const { bias, preTapSwing, pullbackSwing, keyLevels = [] } = opts;
+  let ebo = null;
+  let ibo = null;
+  let retestTap = null;
+
+  if (preTapSwing && Number.isFinite(Number(preTapSwing.level))) {
+    const startIdx = Math.max(0, Number(preTapSwing.index ?? 0) + 1);
+    const lvl = Number(preTapSwing.level);
+
+    for (let i = startIdx; i < candles.length; i++) {
+      const close = Number(candles[i].close);
+      if (Number.isNaN(close)) continue;
+
+      const broke = (bias === "BULLISH" && close < lvl) || (bias === "BEARISH" && close > lvl);
+      if (broke) {
+        ebo = {
+          type: "EBO",
+          level: lvl,
+          close,
+          datetime: candles[i].datetime || candles[i].date,
+          index: i
+        };
+        break;
+      }
+    }
+  }
+
+  if (pullbackSwing && Number.isFinite(Number(pullbackSwing.level))) {
+    const startIdx = Math.max(ebo ? ebo.index + 1 : 0, Number(pullbackSwing.index ?? 0) + 1);
+    const lvl = Number(pullbackSwing.level);
+
+    for (let i = startIdx; i < candles.length; i++) {
+      const close = Number(candles[i].close);
+      if (Number.isNaN(close)) continue;
+
+      const broke = (bias === "BULLISH" && close > lvl) || (bias === "BEARISH" && close < lvl);
+      if (broke) {
+        ibo = {
+          type: "IBO",
+          level: lvl,
+          close,
+          datetime: candles[i].datetime || candles[i].date,
+          index: i
+        };
+        break;
+      }
+    }
+  }
+
+  const latestBreak =
+    ebo && ibo ? (ibo.index >= ebo.index ? ibo : ebo) : ibo || ebo || null;
+
+  const candidateLevels = [];
+  if (Array.isArray(keyLevels)) {
+    for (const kl of keyLevels) {
+      if (!kl) continue;
+      const low = Number(kl.low ?? kl.level);
+      const high = Number(kl.high ?? kl.level);
+      if (!Number.isFinite(low) || !Number.isFinite(high)) continue;
+      candidateLevels.push({
+        label: kl.type || "KEY LEVEL",
+        low: Math.min(low, high),
+        high: Math.max(low, high),
+        price: Number(kl.level ?? kl.high ?? kl.low),
+        formedIndex: Number.isFinite(Number(kl.formation_index)) ? Number(kl.formation_index) : -1
+      });
+    }
+  }
+
+  if (ebo && Number.isFinite(Number(ebo.level))) {
+    candidateLevels.push({
+      label: "EXTERNAL BO",
+      low: Number(ebo.level),
+      high: Number(ebo.level),
+      price: Number(ebo.level),
+      formedIndex: ebo.index
+    });
+  }
+
+  if (ibo && Number.isFinite(Number(ibo.level))) {
+    candidateLevels.push({
+      label: "INTERNAL BO",
+      low: Number(ibo.level),
+      high: Number(ibo.level),
+      price: Number(ibo.level),
+      formedIndex: ibo.index
+    });
+  }
+
+  if (latestBreak && candidateLevels.length > 0) {
+    for (let i = latestBreak.index + 1; i < candles.length; i++) {
+      const high = Number(candles[i].high);
+      const low = Number(candles[i].low);
+      if (!Number.isFinite(high) || !Number.isFinite(low)) continue;
+
+      const tappedLevel = candidateLevels.find(
+        kl => kl.formedIndex < i && low <= kl.high && high >= kl.low
+      );
+
+      if (tappedLevel) {
+        retestTap = {
+          label: tappedLevel.label,
+          level: tappedLevel.price,
+          datetime: candles[i].datetime || candles[i].date,
+          index: i
+        };
+        break;
+      }
+    }
+  }
+
+  return {
+    ebo,
+    ibo,
+    retestTap,
+    latestBreak,
+    hasBreak: Boolean(latestBreak)
+  };
+}
+
+async function buildStorylineReport(rawSymbol) {
+  const symbol = normalizeSymbol(rawSymbol || "GBPUSD");
+
+  const [rawW1, rawD1, rawH4] = await Promise.all([
+    getMarketCandles(symbol, "1week", 100),
+    getMarketCandles(symbol, "1day", 150),
+    getMarketCandles(symbol, "4h", 150)
+  ]);
+
+  const d1Candles = prepareStorylineCandles(rawD1, { excludeWeekends: true });
+  const h4Candles = prepareStorylineCandles(rawH4, { excludeWeekends: true });
+  const mergedW1 = mergeWeeklyCandlesWithDailyFallback(
+    prepareStorylineCandles(rawW1, { excludeWeekends: false }),
+    d1Candles
+  );
+  const w1Candles = prepareStorylineCandles(mergedW1, { excludeWeekends: false });
+
+  const w1Storyline = w1Candles.length >= 2 ? detectWeeklyStoryline(w1Candles) : null;
+  const d1Structure = d1Candles.length >= 5 ? detectDailyStructure(d1Candles) : null;
+  const h4Structure = h4Candles.length >= 5 ? detectH4Structure(h4Candles) : null;
+  const w1ToD1 = w1Candles.length >= 3 && d1Candles.length >= 5
+    ? detectWeeklyToDailyEbo(w1Candles, d1Candles)
+    : null;
+  const d1ToH4 = d1Candles.length >= 5 && h4Candles.length >= 5
+    ? detectDailyToH4Ebo(d1Candles, h4Candles)
+    : null;
+
+  const w1Bias = w1Storyline?.bias && w1Storyline.bias !== "NONE" ? w1Storyline.bias : "NEUTRAL";
+  const d1Bias = d1Structure?.direction && d1Structure.direction !== "UNCONFIRMED"
+    ? d1Structure.direction
+    : w1Bias;
+  const h4Bias = h4Structure?.direction && h4Structure.direction !== "UNCONFIRMED"
+    ? h4Structure.direction
+    : d1Bias;
+
+  const latestW1 = w1Candles?.[w1Candles.length - 1];
+  const w1Summary = w1Storyline?.formation
+    ? `W1: ${w1Storyline.formation} (${w1Storyline.bias || "NEUTRAL"}) · ${formatBreakDate12h(w1Storyline.reaction_date || latestW1?.datetime)}`
+    : `W1: ${w1Bias} · ${latestW1 ? formatBreakDate12h(latestW1.datetime) : "N/A"}`;
+
+  const w1d1Setup = w1ToD1?.latest_setup || null;
+  const d1h4Setup = d1ToH4?.latest_setup || null;
+
+  const d1PreTapSwing =
+    d1Bias === "BULLISH"
+      ? d1Structure?.bullishKeyLevelContact?.protected_hl || d1Structure?.protectedHL || null
+      : d1Structure?.bearishKeyLevelContact?.protected_lh || d1Structure?.protectedLH || null;
+
+  const d1PullbackSwing =
+    w1d1Setup?.pullback && Number.isFinite(Number(w1d1Setup.pullback.level))
+      ? {
+          level: Number(w1d1Setup.pullback.level),
+          index: Math.max(
+            0,
+            d1Candles.findIndex(c => String(c.datetime) === String(w1d1Setup.pullback.date))
+          )
+        }
+      : null;
+
+  const d1State = evaluateTfStoryline(d1Candles, {
+    bias: d1Bias,
+    preTapSwing: d1PreTapSwing,
+    pullbackSwing: d1PullbackSwing,
+    keyLevels: d1Structure?.keyLevels || []
+  });
+
+  const h4ExternalEvent = Array.isArray(h4Structure?.events)
+    ? [...h4Structure.events]
+        .reverse()
+        .find(ev => ev.type === "BULLISH_EBO" || ev.type === "BEARISH_EBO")
+    : null;
+
+  const h4Confirmed =
+    d1State.hasBreak && d1State.retestTap
+      ? h4ExternalEvent
+        ? {
+            type: "H4 EBO",
+            price: h4ExternalEvent.close ?? h4ExternalEvent.broken_level,
+            datetime: h4ExternalEvent.date
+          }
+        : d1h4Setup?.ebo
+        ? {
+            type: String(d1h4Setup.ebo.type || "H4 EBO").replace("_", " "),
+            price: d1h4Setup.ebo.close ?? d1h4Setup.ebo.broken_pullback_level,
+            datetime: d1h4Setup.ebo.date
+          }
+        : null
+      : null;
+
+  const storylineEmoji = d1Bias === "BULLISH" ? "🟢" : d1Bias === "BEARISH" ? "🔴" : "⚪";
+  const storylineDir = d1Bias === "BULLISH" ? "BULLISH" : d1Bias === "BEARISH" ? "BEARISH" : "NEUTRAL";
+
+  const d1BreakLine = d1State.latestBreak
+    ? `D1 ${d1State.latestBreak.type} @ <b>${formatPrice(d1State.latestBreak.close)}</b> · ${formatBreakDate12h(d1State.latestBreak.datetime)}`
+    : `D1 break: <i>None confirmed yet</i>`;
+
+  const d1TapLine = d1State.retestTap
+    ? `D1 tap (${d1State.retestTap.label}) @ <b>${formatPrice(d1State.retestTap.level)}</b> · ${formatBreakDate12h(d1State.retestTap.datetime)}`
+    : d1State.latestBreak
+    ? `D1 tap: <i>Waiting for tap into D1 key level (open/close, external BO, or internal BO)</i>`
+    : `D1 tap: <i>Pending D1 break</i>`;
+
+  const h4BreakLine =
+    d1State.hasBreak && d1State.retestTap
+      ? h4Confirmed
+        ? `${h4Confirmed.type} @ <b>${formatPrice(h4Confirmed.price)}</b> · ${formatBreakDate12h(h4Confirmed.datetime)}`
+        : `H4 break: <i>Watching for H4 breakout (external BO preferred)</i>`
+      : `H4 break: <i>Locked until D1 breaks & taps a key level</i>`;
+
+  const sequenceStatus = h4Confirmed
+    ? `<b>Status: H4 breakout confirmed — look for entries</b>`
+    : `<b>Status: Waiting on full W1 > D1 > H4 sequence</b>`;
+
+  const fullMessage =
+    `${storylineEmoji} <b>${storylineDir} STORYLINE —</b>\n` +
+    `<b>${symbol} · W1 > D1 > H4</b>\n\n` +
+    `${w1Summary}\n` +
+    `${d1BreakLine}\n` +
+    `${d1TapLine}\n` +
+    `${h4BreakLine}\n\n` +
+    `${sequenceStatus}\n\n` +
+    `Sent ${formatWatTimestamp()}\n\n` +
+    `Not an entry signal — bias context only.`;
+
+  const stageText = h4Confirmed
+    ? "H4 BO confirmed"
+    : d1State.retestTap
+    ? "D1 tapped · watching H4"
+    : d1State.latestBreak
+    ? `D1 ${d1State.latestBreak.type} · awaiting tap`
+    : "Awaiting D1 break";
+
+  const compactLine = `${storylineEmoji} <b>${symbol}</b> · W1: <code>${w1Bias}</code> · D1: <code>${d1Bias}</code> · H4: <code>${h4Bias}</code> (${stageText})`;
+
+  return { symbol, w1Bias, d1Bias, h4Bias, fullMessage, compactLine };
+}
+
 // =====================================
 // HOME & TELEGRAM WEBHOOK (PART 1)
 // =====================================
@@ -1842,44 +2119,58 @@ let argument = parts[1];
         }
 
     if (command === "/status") {
-      const uptimeMins = Math.floor(process.uptime() / 60);
-      await sendMessage(
-        chatId,
-        `🟢 <b>DEE SM SLK BOT — ONLINE</b>\n\n` +
-        `• Uptime: <code>${uptimeMins} mins</code>\n` +
-        `• Authorized IDs: <code>${ALLOWED_CHAT_IDS.length}</code>`
-      );
-      return;
+  const uptimeMins = Math.floor(process.uptime() / 60);
+  await sendMessage(
+    chatId,
+    `🟢 <b>DEE SM SLK BOT — ONLINE</b>\n\n` +
+      `• Uptime: <code>${uptimeMins} mins</code>`
+  );
+  return;
+}
+
+if (command === "/bias" || command === "/bais") {
+  if (argument) {
+    const symbol = normalizeSymbol(argument);
+    await sendMessage(chatId, `Checking <b>${symbol}</b> W1, D1 & H4 structure...`);
+    const report = await buildStorylineReport(symbol);
+    await sendMessage(chatId, report.fullMessage, buildStorylineInlineKeyboard(symbol));
+    return;
+  }
+
+  const activePairs = await databaseRequest(
+    `watchlist?chat_id=eq.${chatId}&is_active=eq.true`
+  );
+
+  if (!activePairs || activePairs.length === 0) {
+    await sendMessage(chatId, "Your watchlist is empty. Add a pair first with <code>/add GBPUSD</code>.");
+    return;
+  }
+
+  await sendMessage(
+    chatId,
+    `📊 <b>Scanning Bias (${activePairs.length} active pair${activePairs.length > 1 ? "s" : ""})...</b>`
+  );
+
+  const lines = [];
+  for (const item of activePairs) {
+    const sym = normalizeSymbol(item.symbol);
+    try {
+      const report = await buildStorylineReport(sym);
+      lines.push(report.compactLine);
+    } catch (err) {
+      lines.push(`⚠️ <b>${sym}</b> · <i>Data error (${err.message})</i>`);
     }
+    await new Promise(resolve => setTimeout(resolve, 600));
+  }
 
-        if (command === "/bias" || command === "/bais") {
-      if (argument) {
-        command = "/check";
-      } else {
-        const activePairs = await databaseRequest(
-          `watchlist?chat_id=eq.${chatId}&is_active=eq.true`
-        );
-
-        if (!activePairs || activePairs.length === 0) {
-          await sendMessage(chatId, "Your watchlist is empty. Add a pair first with <code>/add GBPUSD</code>.");
-          return;
-        }
-
-        await sendMessage(
-          chatId,
-          `📊 <b>Scanning Bias (${activePairs.length} active pair${activePairs.length > 1 ? "s" : ""})...</b>`
-        );
-
-        for (const item of activePairs) {
-          const sym = normalizeSymbol(item.symbol);
-          // Reuse your existing check/analysis handler for each symbol
-          argument = sym;
-          command = "/check";
-          // If your /check handler is right below or inside a function, call it here
-        }
-        return;
-      }
-        }
+  await sendMessage(
+    chatId,
+    `<b>WATCHLIST BIAS SUMMARY</b>\n\n` +
+      `${lines.join("\n")}\n\n` +
+      `<i>Not an entry signal — bias context only.</i>`
+  );
+  return;
+}
     
         if (command === "/add") {
       if (!argument) {
@@ -1959,282 +2250,15 @@ let argument = parts[1];
       );
       return;
         }
-  
+    
 if (command === "/check") {
-  const rawText = message?.text || req.body?.message?.text || "";
-  const parts = String(rawText).trim().split(/\s+/);
-  const symbol = normalizeSymbol(parts[1] || "GBPUSD");
+  const symbol = normalizeSymbol(argument || "GBPUSD");
   await sendMessage(chatId, `Checking <b>${symbol}</b> W1, D1 & H4 structure...`);
-
-  const [rawW1, rawD1, rawH4] = await Promise.all([
-    getMarketCandles(symbol, "1week", 100),
-    getMarketCandles(symbol, "1day", 150),
-    getMarketCandles(symbol, "4h", 150)
-  ]);
-
-  const d1Candles = prepareStorylineCandles(rawD1, { excludeWeekends: true });
-  const h4Candles = prepareStorylineCandles(rawH4, { excludeWeekends: true });
-  const mergedW1 = mergeWeeklyCandlesWithDailyFallback(
-    prepareStorylineCandles(rawW1, { excludeWeekends: false }),
-    d1Candles
-  );
-  const w1Candles = prepareStorylineCandles(mergedW1, { excludeWeekends: false });
-
-  const w1Storyline = w1Candles.length >= 2 ? detectWeeklyStoryline(w1Candles) : null;
-  const d1Structure = d1Candles.length >= 5 ? detectDailyStructure(d1Candles) : null;
-  const h4Structure = h4Candles.length >= 5 ? detectH4Structure(h4Candles) : null;
-  const w1ToD1 = w1Candles.length >= 3 && d1Candles.length >= 5
-    ? detectWeeklyToDailyEbo(w1Candles, d1Candles)
-    : null;
-  const d1ToH4 = d1Candles.length >= 5 && h4Candles.length >= 5
-    ? detectDailyToH4Ebo(d1Candles, h4Candles)
-    : null;
-
-  const w1Bias = w1Storyline?.bias && w1Storyline.bias !== "NONE" ? w1Storyline.bias : "NEUTRAL";
-  const d1Bias = d1Structure?.direction && d1Structure.direction !== "UNCONFIRMED"
-    ? d1Structure.direction
-    : w1Bias;
-  const h4Bias = h4Structure?.direction && h4Structure.direction !== "UNCONFIRMED"
-    ? h4Structure.direction
-    : d1Bias;
-
-  const formatBreakDate12h = (rawDate) => {
-    if (!rawDate) return "N/A";
-    const str = String(rawDate).trim();
-    const match = str.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{1,2}):(\d{2})(?::\d{2})?/);
-    if (!match) return str;
-
-    const [, datePart, hourRaw, minutePart] = match;
-    let hour = Number(hourRaw);
-    const ampm = hour >= 12 ? "PM" : "AM";
-    hour = hour % 12;
-    if (hour === 0) hour = 12;
-
-    return `${datePart} ${hour}:${minutePart} ${ampm} WAT`;
-  };
-
-  const latestW1 = w1Candles?.[w1Candles.length - 1];
-  const w1Summary = w1Storyline?.formation
-    ? `W1: ${w1Storyline.formation} (${w1Storyline.bias || "NEUTRAL"}) · ${formatBreakDate12h(w1Storyline.reaction_date || latestW1?.datetime)}`
-    : `W1: ${w1Bias} · ${latestW1 ? formatBreakDate12h(latestW1.datetime) : "N/A"}`;
-
-  const w1d1Setup = w1ToD1?.latest_setup || null;
-  const d1h4Setup = d1ToH4?.latest_setup || null;
-
-  const d1PreTapSwing =
-    d1Bias === "BULLISH"
-      ? d1Structure?.bullishKeyLevelContact?.protected_hl || d1Structure?.protectedHL || null
-      : d1Structure?.bearishKeyLevelContact?.protected_lh || d1Structure?.protectedLH || null;
-
-  const d1PullbackSwing =
-    w1d1Setup?.pullback && Number.isFinite(Number(w1d1Setup.pullback.level))
-      ? {
-          level: Number(w1d1Setup.pullback.level),
-          index: Math.max(
-            0,
-            d1Candles.findIndex(c => String(c.datetime) === String(w1d1Setup.pullback.date))
-          )
-        }
-      : null;
-
-  const evaluateTfStoryline = (candles, opts = {}) => {
-    if (!Array.isArray(candles) || candles.length === 0) {
-      return { ebo: null, ibo: null, retestTap: null, latestBreak: null, hasBreak: false };
-    }
-
-    const { bias, preTapSwing, pullbackSwing, keyLevels = [] } = opts;
-    let ebo = null;
-    let ibo = null;
-    let retestTap = null;
-
-    // 1. External break (EBO)
-    if (preTapSwing && Number.isFinite(Number(preTapSwing.level))) {
-      const startIdx = Math.max(0, Number(preTapSwing.index ?? 0) + 1);
-      const lvl = Number(preTapSwing.level);
-
-      for (let i = startIdx; i < candles.length; i++) {
-        const close = Number(candles[i].close);
-        if (Number.isNaN(close)) continue;
-
-        const broke = (bias === "BULLISH" && close < lvl) || (bias === "BEARISH" && close > lvl);
-        if (broke) {
-          ebo = {
-            type: "EBO",
-            level: lvl,
-            close,
-            datetime: candles[i].datetime || candles[i].date,
-            index: i
-          };
-          break;
-        }
-      }
-    }
-
-    // 2. Internal break (IBO)
-    if (pullbackSwing && Number.isFinite(Number(pullbackSwing.level))) {
-      const startIdx = Math.max(ebo ? ebo.index + 1 : 0, Number(pullbackSwing.index ?? 0) + 1);
-      const lvl = Number(pullbackSwing.level);
-
-      for (let i = startIdx; i < candles.length; i++) {
-        const close = Number(candles[i].close);
-        if (Number.isNaN(close)) continue;
-
-        const broke = (bias === "BULLISH" && close > lvl) || (bias === "BEARISH" && close < lvl);
-        if (broke) {
-          ibo = {
-            type: "IBO",
-            level: lvl,
-            close,
-            datetime: candles[i].datetime || candles[i].date,
-            index: i
-          };
-          break;
-        }
-      }
-    }
-
-    const latestBreak =
-      ebo && ibo ? (ibo.index >= ebo.index ? ibo : ebo) : ibo || ebo || null;
-
-    // 3. Tap into ANY qualifying key level (open/close, external BO, or internal BO) after the break
-    const candidateLevels = [];
-    if (Array.isArray(keyLevels)) {
-      for (const kl of keyLevels) {
-        if (!kl) continue;
-        const low = Number(kl.low ?? kl.level);
-        const high = Number(kl.high ?? kl.level);
-        if (!Number.isFinite(low) || !Number.isFinite(high)) continue;
-        candidateLevels.push({
-          label: kl.type || "KEY LEVEL",
-          low: Math.min(low, high),
-          high: Math.max(low, high),
-          price: Number(kl.level ?? kl.high ?? kl.low),
-          formedIndex: Number.isFinite(Number(kl.formation_index)) ? Number(kl.formation_index) : -1
-        });
-      }
-    }
-
-    if (ebo && Number.isFinite(Number(ebo.level))) {
-      candidateLevels.push({
-        label: "EXTERNAL BO",
-        low: Number(ebo.level),
-        high: Number(ebo.level),
-        price: Number(ebo.level),
-        formedIndex: ebo.index
-      });
-    }
-
-    if (ibo && Number.isFinite(Number(ibo.level))) {
-      candidateLevels.push({
-        label: "INTERNAL BO",
-        low: Number(ibo.level),
-        high: Number(ibo.level),
-        price: Number(ibo.level),
-        formedIndex: ibo.index
-      });
-    }
-
-    if (latestBreak && candidateLevels.length > 0) {
-      for (let i = latestBreak.index + 1; i < candles.length; i++) {
-        const high = Number(candles[i].high);
-        const low = Number(candles[i].low);
-        if (!Number.isFinite(high) || !Number.isFinite(low)) continue;
-
-        const tappedLevel = candidateLevels.find(
-          kl => kl.formedIndex < i && low <= kl.high && high >= kl.low
-        );
-
-        if (tappedLevel) {
-          retestTap = {
-            label: tappedLevel.label,
-            level: tappedLevel.price,
-            datetime: candles[i].datetime || candles[i].date,
-            index: i
-          };
-          break;
-        }
-      }
-    }
-
-    return {
-      ebo,
-      ibo,
-      retestTap,
-      latestBreak,
-      hasBreak: Boolean(latestBreak)
-    };
-  };
-
-  const d1State = evaluateTfStoryline(d1Candles, {
-    bias: d1Bias,
-    preTapSwing: d1PreTapSwing,
-    pullbackSwing: d1PullbackSwing,
-    keyLevels: d1Structure?.keyLevels || []
-  });
-
-  // Check H4 breakout once D1 has broken and tapped a qualifying Daily key level
-  const h4ExternalEvent = Array.isArray(h4Structure?.events)
-    ? [...h4Structure.events]
-        .reverse()
-        .find(ev => ev.type === "BULLISH_EBO" || ev.type === "BEARISH_EBO")
-    : null;
-
-  const h4Confirmed =
-    d1State.hasBreak && d1State.retestTap
-      ? h4ExternalEvent
-        ? {
-            type: "H4 EBO",
-            price: h4ExternalEvent.close ?? h4ExternalEvent.broken_level,
-            datetime: h4ExternalEvent.date
-          }
-        : d1h4Setup?.ebo
-        ? {
-            type: String(d1h4Setup.ebo.type || "H4 EBO").replace("_", " "),
-            price: d1h4Setup.ebo.close ?? d1h4Setup.ebo.broken_pullback_level,
-            datetime: d1h4Setup.ebo.date
-          }
-        : null
-      : null;
-
-  const storylineEmoji = d1Bias === "BULLISH" ? "🟢" : d1Bias === "BEARISH" ? "🔴" : "⚪";
-  const storylineDir = d1Bias === "BULLISH" ? "BULLISH" : d1Bias === "BEARISH" ? "BEARISH" : "NEUTRAL";
-
-  const d1BreakLine = d1State.latestBreak
-    ? `D1 ${d1State.latestBreak.type} @ <b>${formatPrice(d1State.latestBreak.close)}</b> · ${formatBreakDate12h(d1State.latestBreak.datetime)}`
-    : `D1 break: <i>None confirmed yet</i>`;
-
-  const d1TapLine = d1State.retestTap
-    ? `D1 tap (${d1State.retestTap.label}) @ <b>${formatPrice(d1State.retestTap.level)}</b> · ${formatBreakDate12h(d1State.retestTap.datetime)}`
-    : d1State.latestBreak
-    ? `D1 tap: <i>Waiting for tap into D1 key level (open/close, external BO, or internal BO)</i>`
-    : `D1 tap: <i>Pending D1 break</i>`;
-
-  const h4BreakLine =
-    d1State.hasBreak && d1State.retestTap
-      ? h4Confirmed
-        ? `${h4Confirmed.type} @ <b>${formatPrice(h4Confirmed.price)}</b> · ${formatBreakDate12h(h4Confirmed.datetime)}`
-        : `H4 break: <i>Watching for H4 breakout (external BO preferred)</i>`
-      : `H4 break: <i>Locked until D1 breaks & taps a key level</i>`;
-
-  const sequenceStatus = h4Confirmed
-    ? `<b>Status: H4 breakout confirmed — look for entries</b>`
-    : `<b>Status: Waiting on full W1 > D1 > H4 sequence</b>`;
-
-  const msg =
-    `${storylineEmoji} <b>${storylineDir} STORYLINE —</b>\n` +
-    `<b>${symbol} · W1 > D1 > H4</b>\n\n` +
-    `${w1Summary}\n` +
-    `${d1BreakLine}\n` +
-    `${d1TapLine}\n` +
-    `${h4BreakLine}\n\n` +
-    `${sequenceStatus}\n\n` +
-    `Sent ${formatWatTimestamp()}\n\n` +
-    `Not an entry signal — bias context only.`;
-
-  await sendMessage(chatId, msg, buildStorylineInlineKeyboard(symbol));
+  const report = await buildStorylineReport(symbol);
+  await sendMessage(chatId, report.fullMessage, buildStorylineInlineKeyboard(symbol));
   return;
 }
-    
+      
     if (command === "/weekly") {
       const now = new Date();
       const watNow = getWatNow(now);
