@@ -1887,12 +1887,13 @@ async function getCachedStorylineReport(rawSymbol) {
 
 async function buildStorylineReport(rawSymbol) {
   const symbol = normalizeSymbol(rawSymbol || "GBPUSD");
-
-  const [rawW1, rawD1, rawH4] = await Promise.all([
-    getMarketCandles(symbol, "1week", 100),
-    getMarketCandles(symbol, "1day", 150),
-    getMarketCandles(symbol, "4h", 150)
-  ]);
+  
+  const rawW1 = await getMarketCandles(symbol, "1week", 100);
+  await new Promise(resolve => setTimeout(resolve, 8500));
+  const rawD1 = await getMarketCandles(symbol, "1day", 150);
+  await new Promise(resolve => setTimeout(resolve, 8500));
+  const rawH4 = await getMarketCandles(symbol, "4h", 150);
+  
 
   const d1Candles = prepareStorylineCandles(rawD1, { excludeWeekends: true });
   const h4Candles = prepareStorylineCandles(rawH4, { excludeWeekends: true });
@@ -2401,11 +2402,11 @@ if (command === "/bias" || command === "/bais") {
 if (command === "/check") {
   const symbol = normalizeSymbol(argument || "GBPUSD");
   await sendMessage(chatId, `Checking <b>${symbol}</b> W1, D1 & H4 structure...`);
-  const report = await buildStorylineReport(symbol);
+  const report = await getCachedStorylineReport(symbol);
   await sendMessage(chatId, report.fullMessage, buildStorylineInlineKeyboard(symbol));
   return;
 }
-      
+       
     if (command === "/weekly") {
   const now = new Date();
   const watNow = typeof getWatNow === "function" ? (getWatNow(now) || now) : now;
@@ -2793,11 +2794,12 @@ async function scanWatchlistOnce() {
 
     for (const symbol of symbols) {
       try {
-        const [rawW1, rawD1, rawH4] = await Promise.all([
-          getMarketCandles(symbol, "1week", 100),
-          getMarketCandles(symbol, "1day", 150),
-          getMarketCandles(symbol, "4h", 150)
-        ]);
+        const rawW1 = await getMarketCandles(symbol, "1week", 100);
+await new Promise(resolve => setTimeout(resolve, 8500));
+const rawD1 = await getMarketCandles(symbol, "1day", 150);
+await new Promise(resolve => setTimeout(resolve, 8500));
+const rawH4 = await getMarketCandles(symbol, "4h", 150);
+        
 
         const w1Candles = filterCompletedWeeklyCandles(rawW1).candles;
         const d1Candles = filterCompletedDailyCandles(rawD1).candles;
@@ -2837,7 +2839,7 @@ async function scanWatchlistOnce() {
         console.error(`Monitor fetch error for ${symbol}:`, err.message);
       }
 
-      await new Promise(resolve => setTimeout(resolve, 1200));
+            await new Promise(resolve => setTimeout(resolve, 8500));
     }
 
     for (const row of activeRows) {
