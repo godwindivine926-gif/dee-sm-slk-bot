@@ -312,7 +312,6 @@ function buildWeeklyCandlesFromDaily(d1Candles = []) {
     ) {
       continue;
         }
-    const dateStr = String(candle.datetime).slice(0, 10);
         const dateStr = String(candle.datetime).slice(0, 10);
     const dayOfWeek = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
     if (dayOfWeek === 0 || dayOfWeek === 6) continue;
