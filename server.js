@@ -1942,7 +1942,7 @@ async function buildStorylineReport(rawSymbol) {
     return Number.isFinite(evTs) ? evTs >= tapTs : true;
   };
 
-      const bodyTapDateStr = d1State.retestTap?.datetime
+  const bodyTapDateStr = d1State.retestTap?.datetime
     ? String(d1State.retestTap.datetime).slice(0, 10)
     : null;
   const bodyTapTs = d1State.retestTap?.datetime
@@ -1955,15 +1955,13 @@ async function buildStorylineReport(rawSymbol) {
     return Number.isFinite(evTs) ? evTs >= bodyTapTs : true;
   };
 
-  function findExternalBodyBreak(candles, bias, beforeTs = null, beforeDateStr = null, afterTs = null) {
+  function findLatestBodyBreakAfterTap(candles, bias, afterTs = null) {
     if (!Array.isArray(candles) || candles.length < 3) return null;
     const isBull = bias === "BULLISH";
     const isBear = bias === "BEARISH";
     if (!isBull && !isBear) return null;
 
-    const swingHighs = [];
-    const swingLows = [];
-
+    const bodySwings = [];
     for (let i = 1; i < candles.length - 1; i++) {
       const prev = candles[i - 1];
       const curr = candles[i];
@@ -1978,51 +1976,32 @@ async function buildStorylineReport(rawSymbol) {
       const currBot = Math.min(Number(curr.open), Number(curr.close));
       const nextBot = Math.min(Number(next.open), Number(next.close));
 
-      const swTs = toTimestampMs(dt, false);
-      const swDateStr = String(dt || "").slice(0, 10);
-      const isBeforeTap =
-        Number.isFinite(swTs) && Number.isFinite(beforeTs)
-          ? swTs < beforeTs
-          : beforeDateStr
-          ? swDateStr < beforeDateStr
-          : true;
-
       if (
         isBull &&
-        isBeforeTap &&
         Number.isFinite(prevTop) &&
         Number.isFinite(currTop) &&
         Number.isFinite(nextTop) &&
         currTop >= prevTop &&
         currTop >= nextTop
       ) {
-        swingHighs.push({ index: i, level: currTop, date: dt });
+        bodySwings.push({ type: "BODY_HIGH", index: i, level: currTop, date: dt });
       }
 
       if (
         isBear &&
-        isBeforeTap &&
         Number.isFinite(prevBot) &&
         Number.isFinite(currBot) &&
         Number.isFinite(nextBot) &&
         currBot <= prevBot &&
         currBot <= nextBot
       ) {
-        swingLows.push({ index: i, level: currBot, date: dt });
+        bodySwings.push({ type: "BODY_LOW", index: i, level: currBot, date: dt });
       }
     }
 
-    const candidates = isBull ? swingHighs : swingLows;
-    if (candidates.length === 0) return null;
+    if (bodySwings.length === 0) return null;
 
-    const outerLevel = isBull
-      ? Math.max(...candidates.map(s => s.level))
-      : Math.min(...candidates.map(s => s.level));
-
-    const latestSwing = candidates[candidates.length - 1];
-    const startIdx = Math.max(1, latestSwing.index + 1);
-
-    for (let i = startIdx; i < candles.length; i++) {
+    for (let i = 1; i < candles.length; i++) {
       const c = candles[i];
       const dt = c.datetime || c.date;
       if (Number.isFinite(afterTs) && dt) {
@@ -2033,14 +2012,21 @@ async function buildStorylineReport(rawSymbol) {
       const close = Number(c.close);
       if (!Number.isFinite(close)) continue;
 
-      const brokeExternal = isBull ? close > outerLevel : close < outerLevel;
-      if (brokeExternal) {
+      const priorSwings = bodySwings.filter(sw => sw.index < i);
+      if (priorSwings.length === 0) continue;
+
+      const latestPriorSwing = priorSwings[priorSwings.length - 1];
+      const brokeBody = isBull
+        ? close > latestPriorSwing.level
+        : close < latestPriorSwing.level;
+
+      if (brokeBody) {
         return {
           type: "H4 EBO",
           kind: "EXTERNAL_BO",
           price: close,
-          level: outerLevel,
-          swingDate: latestSwing.date,
+          level: latestPriorSwing.level,
+          swingDate: latestPriorSwing.date,
           datetime: dt
         };
       }
@@ -2051,15 +2037,8 @@ async function buildStorylineReport(rawSymbol) {
 
   let h4Confirmed = null;
   if (d1State.hasBreak && d1State.retestTap && Array.isArray(h4Candles) && h4Candles.length >= 3) {
-    h4Confirmed = findExternalBodyBreak(
-      h4Candles,
-      d1Bias,
-      bodyTapTs,
-      bodyTapDateStr,
-      bodyTapTs
-    );
+    h4Confirmed = findLatestBodyBreakAfterTap(h4Candles, d1Bias, bodyTapTs);
   }
-  
   
   const storylineEmoji = d1Bias === "BULLISH" ? "🟢" : d1Bias === "BEARISH" ? "🔴" : "⚪";
   const storylineDir = d1Bias === "BULLISH" ? "BULLISH" : d1Bias === "BEARISH" ? "BEARISH" : "NEUTRAL";
