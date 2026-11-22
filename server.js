@@ -1942,7 +1942,7 @@ async function buildStorylineReport(rawSymbol) {
     return Number.isFinite(evTs) ? evTs >= tapTs : true;
   };
 
-      const tapDateStr = d1State.retestTap?.datetime
+    const tapDateStr = d1State.retestTap?.datetime
     ? String(d1State.retestTap.datetime).slice(0, 10)
     : null;
   const currentTapTs = d1State.retestTap?.datetime
@@ -1956,15 +1956,63 @@ async function buildStorylineReport(rawSymbol) {
   };
 
   let h4Confirmed = null;
+  let debugBodySwings = [];
+  let debugLastPreTapBodySwing = null;
 
-  if (d1State.hasBreak && d1State.retestTap && h4Candles.length >= 2) {
+  if (d1State.hasBreak && d1State.retestTap && Array.isArray(h4Candles) && h4Candles.length >= 3) {
     const targetBias = d1Bias === "BULLISH" || d1Bias === "BEARISH" ? d1Bias : null;
-    const requiredSwingType = targetBias === "BULLISH" ? "SWING_HIGH" : "SWING_LOW";
-    const h4Swings = identifySwings(h4Candles);
+    const isBull = targetBias !== "BEARISH";
 
-    const preTapSwings = h4Swings.filter(sw => {
-      if (targetBias && sw.type !== requiredSwingType) return false;
-      if (!Number.isFinite(Number(sw.level))) return false;
+    const bodySwings = [];
+    for (let i = 1; i < h4Candles.length - 1; i++) {
+      const prev = h4Candles[i - 1];
+      const curr = h4Candles[i];
+      const next = h4Candles[i + 1];
+
+      const prevTop = Math.max(Number(prev.open), Number(prev.close));
+      const currTop = Math.max(Number(curr.open), Number(curr.close));
+      const nextTop = Math.max(Number(next.open), Number(next.close));
+
+      const prevBot = Math.min(Number(prev.open), Number(prev.close));
+      const currBot = Math.min(Number(curr.open), Number(curr.close));
+      const nextBot = Math.min(Number(next.open), Number(next.close));
+
+      if (
+        isBull &&
+        Number.isFinite(prevTop) &&
+        Number.isFinite(currTop) &&
+        Number.isFinite(nextTop) &&
+        currTop >= prevTop &&
+        currTop >= nextTop
+      ) {
+        bodySwings.push({
+          type: "BODY_HIGH",
+          index: i,
+          date: curr.datetime || curr.date,
+          level: currTop
+        });
+      }
+
+      if (
+        !isBull &&
+        Number.isFinite(prevBot) &&
+        Number.isFinite(currBot) &&
+        Number.isFinite(nextBot) &&
+        currBot <= prevBot &&
+        currBot <= nextBot
+      ) {
+        bodySwings.push({
+          type: "BODY_LOW",
+          index: i,
+          date: curr.datetime || curr.date,
+          level: currBot
+        });
+      }
+    }
+
+    debugBodySwings = bodySwings.slice(-6);
+
+    const preTapBodySwings = bodySwings.filter(sw => {
       const swTs = toTimestampMs(sw.date, false);
       if (Number.isFinite(swTs) && Number.isFinite(currentTapTs)) {
         return swTs < currentTapTs;
@@ -1973,12 +2021,14 @@ async function buildStorylineReport(rawSymbol) {
       return tapDateStr ? swDateStr < tapDateStr : true;
     });
 
-    const lastPreTapSwing =
-      preTapSwings.length > 0 ? preTapSwings[preTapSwings.length - 1] : null;
+    debugLastPreTapBodySwing =
+      preTapBodySwings.length > 0
+        ? preTapBodySwings[preTapBodySwings.length - 1]
+        : null;
 
-    if (lastPreTapSwing) {
-      const targetLevel = Number(lastPreTapSwing.level);
-      const startIdx = Math.max(1, Number(lastPreTapSwing.index ?? 0) + 1);
+    if (debugLastPreTapBodySwing) {
+      const targetLevel = Number(debugLastPreTapBodySwing.level);
+      const startIdx = Math.max(1, Number(debugLastPreTapBodySwing.index) + 1);
 
       for (let i = startIdx; i < h4Candles.length; i++) {
         const candle = h4Candles[i];
@@ -1988,19 +2038,14 @@ async function buildStorylineReport(rawSymbol) {
         const close = Number(candle.close);
         if (!Number.isFinite(close)) continue;
 
-        const tookOutLevel =
-          (targetBias === "BULLISH" && close > targetLevel) ||
-          (targetBias === "BEARISH" && close < targetLevel) ||
-          (!targetBias &&
-            ((lastPreTapSwing.type === "SWING_HIGH" && close > targetLevel) ||
-              (lastPreTapSwing.type === "SWING_LOW" && close < targetLevel)));
+        const brokeByBody = isBull ? close > targetLevel : close < targetLevel;
 
-        if (tookOutLevel) {
+        if (brokeByBody) {
           h4Confirmed = {
             type: "H4 EBO",
             price: close,
             level: targetLevel,
-            swingDate: lastPreTapSwing.date,
+            swingDate: debugLastPreTapBodySwing.date,
             datetime: dt
           };
           break;
@@ -2009,16 +2054,21 @@ async function buildStorylineReport(rawSymbol) {
     }
   }
   
-  if (symbol === "USD/CAD") {
-    console.log("DEBUG USD/CAD H4:", {
+    if (symbol === "USD/CAD") {
+    console.log("DEBUG USD/CAD BODY:", {
       tapDatetime: d1State.retestTap?.datetime,
-      tapDateStr,
-      currentTapTs,
-      h4SwingHighs: identifySwings(h4Candles).filter(s => s.type === "SWING_HIGH").slice(-5),
+      debugBodySwings,
+      debugLastPreTapBodySwing,
       h4Confirmed,
-      lastFewH4: h4Candles.slice(-6).map(c => ({ dt: c.datetime, high: c.high, close: c.close }))
+      lastFewH4: h4Candles.slice(-6).map(c => ({
+        dt: c.datetime,
+        open: c.open,
+        close: c.close,
+        bodyHigh: Math.max(Number(c.open), Number(c.close)),
+        bodyLow: Math.min(Number(c.open), Number(c.close))
+      }))
     });
-  }
+    }
   
   const storylineEmoji = d1Bias === "BULLISH" ? "🟢" : d1Bias === "BEARISH" ? "🔴" : "⚪";
   const storylineDir = d1Bias === "BULLISH" ? "BULLISH" : d1Bias === "BEARISH" ? "BEARISH" : "NEUTRAL";
