@@ -1942,35 +1942,73 @@ async function buildStorylineReport(rawSymbol) {
     return Number.isFinite(evTs) ? evTs >= tapTs : true;
   };
 
-  const h4ExternalEvent = Array.isArray(h4Structure?.events)
-    ? [...h4Structure.events]
-        .reverse()
-        .find(
-          ev =>
-            (ev.type === "BULLISH_EBO" || ev.type === "BEARISH_EBO") &&
-            isAtOrAfterTap(ev.date)
-        )
+    const tapDateStr = d1State.retestTap?.datetime
+    ? String(d1State.retestTap.datetime).slice(0, 10)
+    : null;
+  const tapTs = d1State.retestTap?.datetime
+    ? toTimestampMs(d1State.retestTap.datetime, false)
     : null;
 
-  const validD1H4Ebo =
-    d1h4Setup?.ebo && isAtOrAfterTap(d1h4Setup.ebo.date) ? d1h4Setup.ebo : null;
+  const isAtOrAfterTap = evDate => {
+    if (!tapTs || !evDate) return true;
+    const evTs = toTimestampMs(evDate, false);
+    return Number.isFinite(evTs) ? evTs >= tapTs : true;
+  };
 
-  const h4Confirmed =
-    d1State.hasBreak && d1State.retestTap
-      ? h4ExternalEvent
-        ? {
+  let h4Confirmed = null;
+
+  if (d1State.hasBreak && d1State.retestTap && h4Candles.length >= 2) {
+    const targetBias = d1Bias === "BULLISH" || d1Bias === "BEARISH" ? d1Bias : null;
+    const requiredSwingType = targetBias === "BULLISH" ? "SWING_HIGH" : "SWING_LOW";
+    const h4Swings = identifySwings(h4Candles);
+
+    const preTapSwings = h4Swings.filter(sw => {
+      if (targetBias && sw.type !== requiredSwingType) return false;
+      if (!Number.isFinite(Number(sw.level))) return false;
+      const swTs = toTimestampMs(sw.date, false);
+      if (Number.isFinite(swTs) && Number.isFinite(tapTs)) {
+        return swTs < tapTs;
+      }
+      const swDateStr = String(sw.date || "").slice(0, 10);
+      return tapDateStr ? swDateStr < tapDateStr : true;
+    });
+
+    const lastPreTapSwing =
+      preTapSwings.length > 0 ? preTapSwings[preTapSwings.length - 1] : null;
+
+    if (lastPreTapSwing) {
+      const targetLevel = Number(lastPreTapSwing.level);
+      const startIdx = Math.max(1, Number(lastPreTapSwing.index ?? 0) + 1);
+
+      for (let i = startIdx; i < h4Candles.length; i++) {
+        const candle = h4Candles[i];
+        const dt = candle.datetime || candle.date;
+        if (!isAtOrAfterTap(dt)) continue;
+
+        const close = Number(candle.close);
+        if (!Number.isFinite(close)) continue;
+
+        const tookOutLevel =
+          (targetBias === "BULLISH" && close > targetLevel) ||
+          (targetBias === "BEARISH" && close < targetLevel) ||
+          (!targetBias &&
+            ((lastPreTapSwing.type === "SWING_HIGH" && close > targetLevel) ||
+              (lastPreTapSwing.type === "SWING_LOW" && close < targetLevel)));
+
+        if (tookOutLevel) {
+          h4Confirmed = {
             type: "H4 EBO",
-            price: h4ExternalEvent.close ?? h4ExternalEvent.broken_level,
-            datetime: h4ExternalEvent.date
-          }
-        : validD1H4Ebo
-        ? {
-            type: String(validD1H4Ebo.type || "H4 EBO").replace("_", " "),
-            price: validD1H4Ebo.close ?? validD1H4Ebo.broken_pullback_level,
-            datetime: validD1H4Ebo.date
-          }
-        : null
-      : null;
+            price: close,
+            level: targetLevel,
+            swingDate: lastPreTapSwing.date,
+            datetime: dt
+          };
+          break;
+        }
+      }
+    }
+  }
+  
     if (symbol === "USD/CAD") {
     console.log("DEBUG USD/CAD:", {
       d1Break: d1State.latestBreak,
