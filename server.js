@@ -1524,10 +1524,12 @@ function prepareStorylineCandles(rawCandles, { excludeWeekends = true } = {}) {
 function detectH4TapAndM30Breakout(
   h4Candles,
   m30Candles,
-  bias = "BEARISH",
-  { isH4Active = true, maxH4AgeCandles = 12 } = {}
+  bias = "BULLISH",
+  { isH4Active = false, d1TapDatetime = null, maxH4AgeCandles = 20 } = {}
 ) {
-  if (!isH4Active) {
+  const normalizedBias = bias === "BULLISH" || bias === "BEARISH" ? bias : null;
+
+  if (!isH4Active || !normalizedBias) {
     return {
       h4Ebo: null,
       h4Tap: null,
@@ -1548,22 +1550,59 @@ function detectH4TapAndM30Breakout(
     };
   }
 
-  const h4Struct = detectH4Structure(safeH4);
-  const h4KeyLevels = detectDailyKeyLevels(safeH4);
-
+  const isBull = normalizedBias === "BULLISH";
+  const d1TapTs = d1TapDatetime ? toTimestampMs(d1TapDatetime, false) : null;
   const minAllowedH4Index = Math.max(0, safeH4.length - maxH4AgeCandles);
 
-  const h4EboEvent = Array.isArray(h4Struct?.events)
-    ? [...h4Struct.events]
-        .reverse()
-        .find(ev => {
-          if (ev.type !== "BULLISH_EBO" && ev.type !== "BEARISH_EBO") return false;
-          const idx = safeH4.findIndex(c => String(c.datetime) === String(ev.date));
-          return idx >= minAllowedH4Index;
-        })
-    : null;
+  // 1. Find H4 external body breakout at or after D1 tap
+  const h4BodySwings = [];
+  for (let i = 1; i < safeH4.length - 1; i++) {
+    const prevTop = bodyTop(safeH4[i - 1]);
+    const currTop = bodyTop(safeH4[i]);
+    const nextTop = bodyTop(safeH4[i + 1]);
 
-  if (!h4EboEvent) {
+    const prevBot = bodyBottom(safeH4[i - 1]);
+    const currBot = bodyBottom(safeH4[i]);
+    const nextBot = bodyBottom(safeH4[i + 1]);
+
+    if (isBull && currTop >= prevTop && currTop >= nextTop) {
+      h4BodySwings.push({ type: "BODY_HIGH", index: i, level: currTop, date: safeH4[i].datetime });
+    }
+    if (!isBull && currBot <= prevBot && currBot <= nextBot) {
+      h4BodySwings.push({ type: "BODY_LOW", index: i, level: currBot, date: safeH4[i].datetime });
+    }
+  }
+
+  let h4Ebo = null;
+  let h4EboIndex = -1;
+
+  for (let i = minAllowedH4Index; i < safeH4.length; i++) {
+    const c = safeH4[i];
+    const cTs = toTimestampMs(c.datetime, false);
+    if (Number.isFinite(d1TapTs) && Number.isFinite(cTs) && cTs < d1TapTs) {
+      continue;
+    }
+
+    const priorSwings = h4BodySwings.filter(sw => sw.index < i);
+    if (!priorSwings.length) continue;
+
+    const targetSwing = priorSwings[priorSwings.length - 1];
+    const close = Number(c.close);
+    const brokeExternal = isBull ? close > targetSwing.level : close < targetSwing.level;
+
+    if (brokeExternal) {
+      h4Ebo = {
+        type: `${normalizedBias}_H4_EBO`,
+        broken_level: targetSwing.level,
+        close,
+        date: c.datetime
+      };
+      h4EboIndex = i;
+      break;
+    }
+  }
+
+  if (!h4Ebo || h4EboIndex < 0) {
     return {
       h4Ebo: null,
       h4Tap: null,
@@ -1572,63 +1611,43 @@ function detectH4TapAndM30Breakout(
     };
   }
 
-  const h4EboIndex = safeH4.findIndex(c => String(c.datetime) === String(h4EboEvent.date));
-  const startH4Idx = h4EboIndex >= 0 ? h4EboIndex + 1 : 1;
-
-  const h4Swings = identifySwings(safeH4);
-  const effectiveBias =
-    h4EboEvent.type === "BULLISH_EBO"
-      ? "BULLISH"
-      : h4EboEvent.type === "BEARISH_EBO"
-      ? "BEARISH"
-      : bias;
-
-  const candidateH4Levels = [];
-
-  if (Number.isFinite(Number(h4EboEvent.broken_level))) {
-    const lvl = Number(h4EboEvent.broken_level);
-    candidateH4Levels.push({ label: "H4 EBO LEVEL", low: lvl, high: lvl, price: lvl });
-  }
-
-  if (Number.isFinite(Number(h4EboEvent.close))) {
-    const cls = Number(h4EboEvent.close);
-    candidateH4Levels.push({ label: "H4 BREAK CLOSE", low: cls, high: cls, price: cls });
-  }
+  // 2. Find H4 tap into the broken external body level or H4 key level at/after H4 EBO
+  const h4KeyLevels = detectDailyKeyLevels(safeH4);
+  const candidateH4Levels = [
+    {
+      label: "H4 EBO BODY LEVEL",
+      low: Number(h4Ebo.broken_level),
+      high: Number(h4Ebo.broken_level),
+      price: Number(h4Ebo.broken_level)
+    },
+    {
+      label: "H4 BREAK CLOSE",
+      low: Number(h4Ebo.close),
+      high: Number(h4Ebo.close),
+      price: Number(h4Ebo.close)
+    }
+  ];
 
   for (const kl of h4KeyLevels) {
-    if (kl.formation_index <= (h4EboIndex >= 0 ? h4EboIndex : safeH4.length - 1)) {
+    if (kl.formation_index <= h4EboIndex && kl.bias === normalizedBias) {
       const low = Math.min(Number(kl.low), Number(kl.high));
       const high = Math.max(Number(kl.low), Number(kl.high));
       if (Number.isFinite(low) && Number.isFinite(high)) {
         candidateH4Levels.push({
-          label: kl.type === "A-SHAPE" || kl.type === "V-SHAPE" ? `${kl.type} KEY LEVEL` : kl.type,
+          label: `${kl.type} KEY LEVEL`,
           low,
           high,
-          price: effectiveBias === "BEARISH" ? high : low
+          price: isBull ? low : high
         });
       }
     }
   }
 
-  for (const sw of h4Swings) {
-    if (sw.index <= (h4EboIndex >= 0 ? h4EboIndex : safeH4.length - 1) && Number.isFinite(Number(sw.level))) {
-      const lvl = Number(sw.level);
-      candidateH4Levels.push({
-        label: sw.type === "SWING_HIGH" ? "H4 SWING HIGH / IBO" : "H4 SWING LOW / IBO",
-        low: lvl,
-        high: lvl,
-        price: lvl
-      });
-    }
-  }
-
   let h4Tap = null;
-  for (let i = startH4Idx; i < safeH4.length; i++) {
+  for (let i = h4EboIndex; i < safeH4.length; i++) {
     const c = safeH4[i];
     const high = Number(c.high);
     const low = Number(c.low);
-    if (!Number.isFinite(high) || !Number.isFinite(low)) continue;
-
     const matched = candidateH4Levels.find(kl => low <= kl.high && high >= kl.low);
     if (matched) {
       h4Tap = {
@@ -1643,65 +1662,65 @@ function detectH4TapAndM30Breakout(
 
   if (!h4Tap) {
     return {
-      h4Ebo: h4EboEvent,
+      h4Ebo,
       h4Tap: null,
       m30Breakout: null,
       status: "WAITING_H4_KEY_LEVEL_TAP"
     };
   }
 
+  // 3. Find 30M body-close breakout after H4 tap in the storyline bias
   const tapTs = toTimestampMs(h4Tap.datetime, false);
   const postTapM30 = safeM30.filter(c => toTimestampMs(c.datetime, false) >= tapTs);
 
   let m30Breakout = null;
-  if (postTapM30.length >= 2) {
-    let referenceLevel = null;
-    if (effectiveBias === "BEARISH") {
-      const m30SwingsLow = identifySwings(postTapM30).filter(s => s.type === "SWING_LOW");
-      referenceLevel = m30SwingsLow.length
-        ? Number(m30SwingsLow[m30SwingsLow.length - 1].level)
-        : Number(postTapM30[0].low);
+  if (postTapM30.length >= 3) {
+    const m30BodySwings = [];
+    for (let i = 1; i < postTapM30.length - 1; i++) {
+      const prevTop = bodyTop(postTapM30[i - 1]);
+      const currTop = bodyTop(postTapM30[i]);
+      const nextTop = bodyTop(postTapM30[i + 1]);
 
-      for (let i = 1; i < postTapM30.length; i++) {
-        const close = Number(postTapM30[i].close);
-        if (Number.isFinite(referenceLevel) && Number.isFinite(close) && close < referenceLevel) {
-          m30Breakout = {
-            direction: "BEARISH",
-            level: referenceLevel,
-            close,
-            datetime: postTapM30[i].datetime
-          };
-          break;
-        }
+      const prevBot = bodyBottom(postTapM30[i - 1]);
+      const currBot = bodyBottom(postTapM30[i]);
+      const nextBot = bodyBottom(postTapM30[i + 1]);
+
+      if (isBull && currTop >= prevTop && currTop >= nextTop) {
+        m30BodySwings.push({ index: i, level: currTop });
       }
-    } else {
-      const m30SwingsHigh = identifySwings(postTapM30).filter(s => s.type === "SWING_HIGH");
-      referenceLevel = m30SwingsHigh.length
-        ? Number(m30SwingsHigh[m30SwingsHigh.length - 1].level)
-        : Number(postTapM30[0].high);
+      if (!isBull && currBot <= prevBot && currBot <= nextBot) {
+        m30BodySwings.push({ index: i, level: currBot });
+      }
+    }
 
-      for (let i = 1; i < postTapM30.length; i++) {
-        const close = Number(postTapM30[i].close);
-        if (Number.isFinite(referenceLevel) && Number.isFinite(close) && close > referenceLevel) {
-          m30Breakout = {
-            direction: "BULLISH",
-            level: referenceLevel,
-            close,
-            datetime: postTapM30[i].datetime
-          };
-          break;
-        }
+    for (let i = 1; i < postTapM30.length; i++) {
+      const prior = m30BodySwings.filter(sw => sw.index < i);
+      if (!prior.length) continue;
+
+      const refLevel = prior[prior.length - 1].level;
+      const close = Number(postTapM30[i].close);
+      const broke30m = isBull ? close > refLevel : close < refLevel;
+
+      if (broke30m) {
+        m30Breakout = {
+          direction: normalizedBias,
+          level: refLevel,
+          close,
+          datetime: postTapM30[i].datetime
+        };
+        break;
       }
     }
   }
 
   return {
-    h4Ebo: h4EboEvent,
+    h4Ebo,
     h4Tap,
     m30Breakout,
     status: m30Breakout ? "M30_BREAKOUT_CONFIRMED" : "WAITING_M30_BREAKOUT"
   };
-                            }
+    }
+                              
 function formatBreakDate12h(rawDate) {
   if (!rawDate) return "N/A";
   const str = String(rawDate).trim();
@@ -2140,22 +2159,34 @@ app.post("/webhook", async (req, res) => {
         return;
       }
 
-          if (action === "entry") {
-        const [rawD1, rawH4, rawM30] = await Promise.all([
-          getMarketCandles(symbol, "1day", 150),
+            if (action === "entry") {
+        const [storylineReport, rawH4, rawM30] = await Promise.all([
+          getCachedStorylineReport(symbol),
           getMarketCandles(symbol, "4h", 150),
           getMarketCandles(symbol, "30min", 150)
         ]);
 
-        const d1Candles = prepareStorylineCandles(rawD1, { excludeWeekends: true });
-        const d1Struct = d1Candles.length >= 5 ? detectDailyStructure(d1Candles) : null;
-        const hasD1KeyLevelTap = Boolean(
-          d1Struct?.bearishKeyLevelContact || d1Struct?.bullishKeyLevelContact
+        const activeBias =
+          storylineReport?.d1Bias && storylineReport.d1Bias !== "NEUTRAL"
+            ? storylineReport.d1Bias
+            : storylineReport?.w1Bias && storylineReport.w1Bias !== "NEUTRAL"
+            ? storylineReport.w1Bias
+            : null;
+
+        const hasD1Tap = Boolean(
+          storylineReport?.fullMessage &&
+            storylineReport.fullMessage.includes("D1 tap (")
         );
 
-        const entryCheck = detectH4TapAndM30Breakout(rawH4, rawM30, "BEARISH", {
-          isH4Active: hasD1KeyLevelTap,
-          maxH4AgeCandles: 12
+        const tapMatch = storylineReport?.fullMessage
+          ? storylineReport.fullMessage.match(/D1 tap \([^)]+\) @ .*? · ([^\n<]+)/)
+          : null;
+        const d1TapDate = tapMatch ? tapMatch[1].trim() : null;
+
+        const entryCheck = detectH4TapAndM30Breakout(rawH4, rawM30, activeBias, {
+          isH4Active: hasD1Tap,
+          d1TapDatetime: d1TapDate,
+          maxH4AgeCandles: 20
         });
 
         if (entryCheck.status === "H4_NOT_ACTIVE") {
@@ -2168,20 +2199,20 @@ app.post("/webhook", async (req, res) => {
         }
 
         const h4EboText = entryCheck.h4Ebo
-          ? `✅ H4 External BO @ <b>${formatPrice(entryCheck.h4Ebo.close ?? entryCheck.h4Ebo.broken_level)}</b> · ${entryCheck.h4Ebo.date}`
-          : `⏳ H4 External BO: <i>No recent H4 external BO confirmed</i>`;
+          ? `✅ H4 External BO (${activeBias}) @ <b>${formatPrice(entryCheck.h4Ebo.close)}</b> · ${formatBreakDate12h(entryCheck.h4Ebo.date)}`
+          : `⏳ H4 External BO (${activeBias}): <i>Waiting for H4 body close beyond prior swing after D1 tap</i>`;
 
         const h4TapText = entryCheck.h4Tap
-          ? `✅ H4 Tap (${entryCheck.h4Tap.label}) @ <b>${formatPrice(entryCheck.h4Tap.price)}</b> · ${entryCheck.h4Tap.datetime}`
+          ? `✅ H4 Tap (${entryCheck.h4Tap.label}) @ <b>${formatPrice(entryCheck.h4Tap.price)}</b> · ${formatBreakDate12h(entryCheck.h4Tap.datetime)}`
           : entryCheck.h4Ebo
-          ? `⏳ H4 Tap: <i>Waiting for tap into H4 breakout / A-shape key level / IBO</i>`
-          : `🔒 H4 Tap: <i>Locked until recent H4 external BO</i>`;
+          ? `⏳ H4 Tap: <i>Waiting for tap into H4 EBO / key level</i>`
+          : `🔒 H4 Tap: <i>Locked until H4 external BO</i>`;
 
         const m30Text = entryCheck.m30Breakout
-          ? `✅ <b>30M Breakout (${entryCheck.m30Breakout.direction})</b> broke <b>${formatPrice(entryCheck.m30Breakout.level)}</b> · closed <b>${formatPrice(entryCheck.m30Breakout.close)}</b> (${entryCheck.m30Breakout.datetime})`
+          ? `✅ <b>30M Breakout (${entryCheck.m30Breakout.direction})</b> broke <b>${formatPrice(entryCheck.m30Breakout.level)}</b> · closed <b>${formatPrice(entryCheck.m30Breakout.close)}</b> (${formatBreakDate12h(entryCheck.m30Breakout.datetime)})`
           : entryCheck.h4Tap
-          ? `⏳ <b>30M Breakout:</b> <i>Watching 30m candles after H4 tap for breakout</i>`
-          : `🔒 <b>30M Breakout:</b> <i>Available once H4 external BO & H4 key-level tap occur</i>`;
+          ? `⏳ <b>30M Breakout (${activeBias}):</b> <i>Watching 30m body closes after H4 tap</i>`
+          : `🔒 <b>30M Breakout:</b> <i>Available once H4 external BO & H4 tap occur</i>`;
 
         await sendMessage(
           chatId,
@@ -2192,8 +2223,8 @@ app.post("/webhook", async (req, res) => {
             `<i>Not an entry signal — verify candle close & risk on chart.</i>`
         );
         return;
-          }
-    }
+            }
+      
     const message = req.body?.message;
     if (!message || !message.text) return;
 
