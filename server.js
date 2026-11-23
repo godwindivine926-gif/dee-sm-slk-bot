@@ -3152,7 +3152,20 @@ function isWeekdayInWat(referenceDate = new Date()) {
 
 function formatWatTimestamp(referenceDate = new Date()) {
   const watNow = getWatNow(referenceDate);
-  return watNow.toISOString().replace("T", " ").slice(0, 16) + " WAT";
+  if (!(watNow instanceof Date) || Number.isNaN(watNow.getTime())) {
+    return String(referenceDate || "");
+  }
+
+  const year = watNow.getUTCFullYear();
+  const month = String(watNow.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(watNow.getUTCDate()).padStart(2, "0");
+
+  const hours24 = watNow.getUTCHours();
+  const minutes = String(watNow.getUTCMinutes()).padStart(2, "0");
+  const period = hours24 >= 12 ? "PM" : "AM";
+  const hours12 = String(hours24 % 12 || 12).padStart(2, "0");
+
+  return `${year}-${month}-${day} ${hours12}:${minutes} ${period} WAT`;
 }
 
 function buildCascadeAlertMessage(symbol, cascadeLabel, setup, context = {}) {
