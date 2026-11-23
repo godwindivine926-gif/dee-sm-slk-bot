@@ -2034,7 +2034,176 @@ function computeDailyIntradayTarget(d1Candles, direction, currentPrice) {
 
   return null;
 }
+function buildLiveD1CandlesWithDeveloping(rawD1, completedD1Candles) {
+  const base = Array.isArray(completedD1Candles) ? [...completedD1Candles] : [];
+  if (!Array.isArray(rawD1)) return base;
 
+  const lastCompletedDt = base.length
+    ? String(base[base.length - 1].datetime).slice(0, 10)
+    : "";
+
+  const extra = rawD1
+    .filter(c => {
+      if (!isValidOhlcCandle(c)) return false;
+      const dateStr = String(c.datetime).slice(0, 10);
+      const day = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
+      if (day === 0 || day === 6) return false;
+      return dateStr > lastCompletedDt;
+    })
+    .sort((a, b) => String(a.datetime).localeCompare(String(b.datetime)));
+
+  return [...base, ...extra];
+}
+
+function detectDevelopingD1TapAfterBreak(liveD1Candles, d1State, bias) {
+  if (!d1State?.latestBreak || !Array.isArray(liveD1Candles) || liveD1Candles.length === 0) {
+    return null;
+  }
+
+  const breakIdx = Number.isFinite(Number(d1State.latestBreak.index))
+    ? Number(d1State.latestBreak.index)
+    : -1;
+  const breakTs = d1State.latestBreak.datetime
+    ? toTimestampMs(d1State.latestBreak.datetime, false)
+    : NaN;
+  const breakLevel = Number(d1State.latestBreak.level ?? d1State.latestBreak.price);
+
+  const levels = [];
+  if (d1State.latestBreak && Number.isFinite(breakLevel)) {
+    levels.push({
+      label: d1State.latestBreak.type === "IBO" ? "INTERNAL BO" : "EXTERNAL BO",
+      low: breakLevel,
+      high: breakLevel,
+      price: breakLevel,
+      formedIndex: breakIdx
+    });
+  }
+
+  for (let i = Math.max(0, breakIdx + 1); i < liveD1Candles.length; i++) {
+    const c = liveD1Candles[i];
+    const cTs = c.datetime ? toTimestampMs(c.datetime, false) : NaN;
+    if (Number.isFinite(breakTs) && Number.isFinite(cTs) && cTs < breakTs) continue;
+
+    const high = Number(c.high);
+    const low = Number(c.low);
+    if (!Number.isFinite(high) || !Number.isFinite(low)) continue;
+
+    for (let k = levels.length - 1; k >= 0; k--) {
+      const kl = levels[k];
+      if (kl.formedIndex < i && low <= kl.high && high >= kl.low) {
+        const priceOk =
+          bias === "BEARISH"
+            ? (!Number.isFinite(breakLevel) || high >= breakLevel)
+            : bias === "BULLISH"
+              ? (!Number.isFinite(breakLevel) || low <= breakLevel)
+              : true;
+
+        if (priceOk) {
+          return {
+            label: kl.label,
+            level: kl.price,
+            price: kl.price,
+            datetime: c.datetime || c.date,
+            index: i,
+            isDeveloping: i >= liveD1Candles.length - 1
+          };
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+function findH4BreakAfterTap(h4Candles, bias, afterTs = null) {
+  const afterMs = afterTs === null || afterTs === undefined ? NaN : toTimestampMs(afterTs, false);
+  if (!Number.isFinite(afterMs) || !Array.isArray(h4Candles) || h4Candles.length < 3) {
+    return null;
+  }
+
+  const isBull = bias === "BULLISH";
+  const isBear = bias === "BEARISH";
+  if (!isBull && !isBear) return null;
+
+  const bodySwings = [];
+  for (let i = 1; i < h4Candles.length - 1; i++) {
+    const prev = h4Candles[i - 1];
+    const curr = h4Candles[i];
+    const next = h4Candles[i + 1];
+    const dt = curr.datetime || curr.date;
+
+    const prevTop = bodyTop(prev);
+    const currTop = bodyTop(curr);
+    const nextTop = bodyTop(next);
+    const prevBot = bodyBottom(prev);
+    const currBot = bodyBottom(curr);
+    const nextBot = bodyBottom(next);
+
+    if (isBull && currTop >= prevTop && currTop >= nextTop) {
+      bodySwings.push({ index: i, level: currTop, date: dt });
+    }
+    if (isBear && currBot <= prevBot && currBot <= nextBot) {
+      bodySwings.push({ index: i, level: currBot, date: dt });
+    }
+  }
+
+  for (let i = 1; i < h4Candles.length; i++) {
+    const c = h4Candles[i];
+    const dt = c.datetime || c.date;
+    const cTs = dt ? toTimestampMs(dt, false) : NaN;
+    if (!Number.isFinite(cTs) || cTs < afterMs) continue;
+
+    const close = Number(c.close);
+    if (!Number.isFinite(close)) continue;
+
+    const priorSwings = bodySwings.filter(sw => sw.index < i);
+    if (!priorSwings.length) continue;
+
+    const target = priorSwings[priorSwings.length - 1];
+    const brokeExternal = isBull ? close > target.level : close < target.level;
+    if (brokeExternal) {
+      return {
+        type: "H4 EBO",
+        kind: "EXTERNAL_BO",
+        price: close,
+        level: target.level,
+        datetime: dt
+      };
+    }
+  }
+
+  const swings = identifySwings(h4Candles);
+  const reqSwingType = isBear ? "SWING_LOW" : "SWING_HIGH";
+  const intSwings = swings.filter(sw => sw.type === reqSwingType);
+
+  for (let i = 1; i < h4Candles.length; i++) {
+    const c = h4Candles[i];
+    const dt = c.datetime || c.date;
+    const cTs = dt ? toTimestampMs(dt, false) : NaN;
+    if (!Number.isFinite(cTs) || cTs < afterMs) continue;
+
+    const close = Number(c.close);
+    if (!Number.isFinite(close)) continue;
+
+    const prior = intSwings.filter(sw => sw.index < i);
+    if (!prior.length) continue;
+
+    const target = prior[prior.length - 1];
+    const brokeInternal = isBull ? close > target.level : close < target.level;
+    if (brokeInternal) {
+      return {
+        type: "H4 IBO",
+        kind: "INTERNAL_BO",
+        price: close,
+        level: target.level,
+        datetime: dt
+      };
+    }
+  }
+
+  return null;
+}
+  
 async function buildStorylineReport(rawSymbol) {
   const symbol = normalizeSymbol(rawSymbol || "GBPUSD");
   
@@ -2135,8 +2304,21 @@ async function buildStorylineReport(rawSymbol) {
           : true);
 
   const validRetestTap = tapMatchesBreakDirection ? d1State.retestTap : null;
-  
-      const tapTs = validRetestTap?.datetime
+    const liveD1Candles = buildLiveD1CandlesWithDeveloping(rawD1, d1Candles);
+  const developingTap = !validRetestTap
+    ? detectDevelopingD1TapAfterBreak(liveD1Candles, d1State, d1Bias)
+    : null;
+
+  const activeRetestTap = validRetestTap || developingTap;
+  const effectiveTapTs = activeRetestTap?.datetime
+    ? toTimestampMs(activeRetestTap.datetime, false)
+    : null;
+
+  let h4Confirmed = null;
+  if (d1State.hasBreak && activeRetestTap && Array.isArray(h4Candles) && effectiveTapTs !== null) {
+    h4Confirmed = findH4BreakAfterTap(h4Candles, d1Bias, effectiveTapTs);
+  }
+   const tapTs = validRetestTap?.datetime
     ? toTimestampMs(validRetestTap.datetime, false)
     : null;
   
@@ -2250,19 +2432,19 @@ const isAtOrAfterTap = evDate => {
     ? `D1 ${d1State.latestBreak.type} @ <b>${formatPrice(d1State.latestBreak.close)}</b> · ${formatBreakDate12h(d1State.latestBreak.datetime)}`
     : `D1 break: <i>None confirmed yet</i>`;
 
-  const d1TapLine = validRetestTap
-  ? `D1 tap (${validRetestTap.label}) @ <b>${formatPrice(validRetestTap.price)}</b> · ${formatBreakDate12h(validRetestTap.datetime)}`
+    const d1TapLine = activeRetestTap
+    ? `D1 tap (${activeRetestTap.label}) @ <b>${formatPrice(activeRetestTap.price)}</b> · ${formatBreakDate12h(activeRetestTap.datetime)}${activeRetestTap.isDeveloping ? " <i>(developing D1)</i>" : ""}`
     : d1State.latestBreak
     ? `D1 tap: <i>Waiting for tap into D1 key level (open/close, external BO, or internal BO)</i>`
     : `D1 tap: <i>Pending D1 break</i>`;
-
-  const h4BreakLine =
-      d1State.hasBreak && validRetestTap
-    ? h4Confirmed
+  
+    const h4BreakLine =
+    d1State.hasBreak && activeRetestTap
+      ? h4Confirmed
         ? `${h4Confirmed.type} @ <b>${formatPrice(h4Confirmed.price)}</b> · ${formatBreakDate12h(h4Confirmed.datetime)}`
         : `H4 break: <i>Watching for H4 breakout (external BO preferred)</i>`
       : `H4 break: <i>Locked until D1 breaks & taps a key level</i>`;
-
+  
   const sequenceStatus = h4Confirmed
     ? `<b>Status: H4 breakout confirmed — look for entries</b>`
     : `<b>Status: Waiting on full W1 > D1 > H4 sequence</b>`;
@@ -2280,14 +2462,14 @@ const isAtOrAfterTap = evDate => {
       `Sent ${formatWatTimestamp()}\n\n` +
      `Not an entry signal — bias context only.`;
 
-  const stageText = h4Confirmed
+    const stageText = h4Confirmed
     ? "H4 BO confirmed"
-      : validRetestTap
-     ? "D1 tapped · watching H4"
+    : activeRetestTap
+    ? "D1 tapped · watching H4"
     : d1State.latestBreak
     ? `D1 ${d1State.latestBreak.type} · awaiting tap`
     : "Awaiting D1 break";
-
+  
   const compactLine = `${storylineEmoji} <b>${symbol}</b> · W1: <code>${w1Bias}</code> · D1: <code>${d1Bias}</code> · H4: <code>${h4Bias}</code> (${stageText})`;
 
     return { symbol, w1Bias, d1Bias, h4Bias, weeklyTarget, dailyTarget, fullMessage, compactLine };
