@@ -2757,8 +2757,8 @@ let argument = parts[1];
   );
   return;
 }
-    
-if (command === "/scan") {
+
+    if (command === "/scan") {
   if (isMarketScannerRunning) {
     await sendMessage(
       chatId,
@@ -2784,7 +2784,7 @@ if (command === "/scan") {
   });
 
   return;
-}
+    }
     
 if (command === "/bias" || command === "/bais") {
   if (argument) {
