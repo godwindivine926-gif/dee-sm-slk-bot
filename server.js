@@ -4095,14 +4095,14 @@ async function runWatchlistDailySummaryAndH4Monitor(chatIds = null) {
             d1CountAtSummary: d1Candles.length
           });
 
-          const emoji = dailySummary.bias === "BULLISH" ? "🟢" : "🔴";
+                    const emoji = dailySummary.bias === "BULLISH" ? "🟢" : "🔴";
           const summaryMsg =
-            `${emoji} <b>DAILY SUMMARY — ${symbol}</b>\n\n` +
-            `Bias: <b>${dailySummary.bias}</b> (Weekly target still active)\n` +
-            `D1: <b>${dailySummary.reason}</b>\n` +
-            `Next: Checking for <b>H4 ${dailySummary.bias} breakout</b> (from prev close or developing D1 candle)\n\n` +
+            `${emoji} <b>DAILY SUMMARY — ${escapeHtml(symbol)}</b>\n\n` +
+            `Bias: <b>${escapeHtml(dailySummary.bias)}</b> (Weekly target still active)\n` +
+            `D1: <b>${escapeHtml(dailySummary.reason)}</b>\n` +
+            `Next: Checking for <b>H4 ${escapeHtml(dailySummary.bias)} breakout</b> (from prev close or developing D1 candle)\n\n` +
             `Sent ${formatWatTimestamp()}`;
-
+          
           for (const chatId of recipients) {
             await sendMessage(chatId, summaryMsg, buildStorylineInlineKeyboard(symbol));
           }
