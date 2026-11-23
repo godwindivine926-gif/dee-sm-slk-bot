@@ -3647,11 +3647,12 @@ async function runPacedMarketScan({
   targetCount = MARKET_SCAN_TARGET_COUNT,
   paceMs = MARKET_SCAN_PAIR_DELAY_MS,
   chatIds = null,
-  triggerLabel = "WEEKLY MARKET SCAN"
+  triggerLabel = "WEEKLY MARKET SCAN",
+  allowWeekend = false
 } = {}) {
   if (isMarketScannerRunning) return;
-  if (!isWeekdayInWat()) return;
-
+  if (!allowWeekend && !isWeekdayInWat()) return;
+  
   isMarketScannerRunning = true;
   let matchedCount = 0;
   const sentPairs = [];
