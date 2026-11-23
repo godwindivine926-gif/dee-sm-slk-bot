@@ -3422,17 +3422,24 @@ const rawH4 = await getMarketCandles(symbol, "4h", 150);
   }
 }
 
-const MARKET_SCAN_UNIVERSE = [
-  "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "USD/CAD", "AUD/USD", "NZD/USD",
-  "EUR/GBP", "EUR/JPY", "EUR/AUD", "EUR/NZD", "EUR/CAD", "EUR/CHF",
-  "GBP/JPY", "GBP/AUD", "GBP/NZD", "GBP/CAD", "GBP/CHF",
-  "AUD/JPY", "AUD/NZD", "AUD/CAD", "AUD/CHF",
-  "NZD/JPY", "NZD/CAD", "NZD/CHF",
-  "CAD/JPY", "CAD/CHF", "CHF/JPY",
-  "XAU/USD", "BTC/USD"
+const BASE_MARKET_UNIVERSE = [
+  "EUR/USD", "EUR/GBP", "BTC/USD", "GBP/JPY", "AUD/NZD", "XAU/USD",
+  "USD/JPY", "EUR/AUD", "CAD/CHF", "GBP/USD", "NZD/JPY", "EUR/CHF",
+  "AUD/USD", "GBP/CAD", "CHF/JPY", "USD/CAD", "EUR/NZD", "AUD/CAD",
+  "GBP/AUD", "NZD/USD", "EUR/CAD", "GBP/NZD", "AUD/JPY", "USD/CHF",
+  "EUR/JPY", "GBP/CHF", "NZD/CAD", "AUD/CHF", "CAD/JPY", "NZD/CHF"
 ];
 
-const MARKET_SCAN_TARGET_COUNT = 7;
+function shuffleMarketUniverse(list) {
+  const arr = [...list];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+const MARKET_SCAN_TARGET_COUNT = 15;
 const MARKET_SCAN_PAIR_DELAY_MS = 65000;
 
 let isMarketScannerRunning = false;
