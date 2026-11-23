@@ -2704,9 +2704,10 @@ app.post("/webhook", async (req, res) => {
       `${m30Text}${targetBlock}\n\n` +
       `<i>Not an entry signal - verify candle close & risk on chart.</i>`
   );
-  return;
-       }
-      
+          return;
+      }
+    }
+    
     const message = req.body?.message;
     if (!message || !message.text) return;
 
