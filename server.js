@@ -3436,7 +3436,7 @@ const rawH4 = await getMarketCandles(symbol, "4h", 150);
         }
       }
 
-      const d1H4Confirmed = (data.d1ToH4?.all_setups || []).filter(s => s.ebo);
+            const d1H4Confirmed = (data.d1ToH4?.all_setups || []).filter(s => s.ebo);
       for (const setup of d1H4Confirmed) {
         const shouldAlert = await recordStorylineEvent(
           chatId,
@@ -3448,16 +3448,16 @@ const rawH4 = await getMarketCandles(symbol, "4h", 150);
         if (shouldAlert) {
           await sendMessage(
             chatId,
-                    buildCascadeAlertMessage(symbol, "D1 > H4", setup, {
-            w1Bias: data.w1Bias,
-            d1Bias: data.d1Bias,
-            nextDayRule: data.nextDayRule
-          }),
-             buildStorylineInlineKeyboard(symbol)
+            buildCascadeAlertMessage(symbol, "D1 > H4", setup, {
+              w1Bias: data.w1Bias,
+              d1Bias: data.d1Bias,
+              nextDayRule: data.nextDayRule
+            }),
+            buildStorylineInlineKeyboard(symbol)
           );
         }
       }
-    }
+
       if (data.liveTapH4Break && data.d1Break && data.activeTap && data.activeBias) {
         const liveKey = `${chatId}:${symbol}:LIVE_D1_TAP_H4_BO:${data.d1Break.datetime}:${data.activeTap.datetime}:${data.liveTapH4Break.datetime}`;
         if (!sentAlertKeys.has(liveKey)) {
@@ -3466,11 +3466,11 @@ const rawH4 = await getMarketCandles(symbol, "4h", 150);
             const badge = data.activeBias === "BULLISH" ? "🟢" : "🔴";
             await sendMessage(
               chatId,
-              `<b>${badge} ${data.activeBias} H4 BREAKOUT AFTER D1 TAP — ${symbol}</b>\n` +
+              `<b>${badge} ${escapeHtml(data.activeBias)} H4 BREAKOUT AFTER D1 TAP — ${escapeHtml(symbol)}</b>\n` +
                 `<b>${data.liveTapH4Break.kind === "INTERNAL_BO" ? "INTERNAL BREAKOUT" : "EXTERNAL BREAKOUT"}</b>\n\n` +
-                `D1 ${data.d1Break.type} @ <b>${formatPrice(data.d1Break.close)}</b> · ${formatBreakDate12h(data.d1Break.datetime)}\n` +
-                `D1 tap (${data.activeTap.label}) @ <b>${formatPrice(data.activeTap.price)}</b> · ${formatBreakDate12h(data.activeTap.datetime)}${data.activeTap.isDeveloping ? " <i>(developing D1)</i>" : ""}\n` +
-                `<b>${data.liveTapH4Break.type}</b> @ <b>${formatPrice(data.liveTapH4Break.price)}</b> · ${formatBreakDate12h(data.liveTapH4Break.datetime)}\n\n` +
+                `D1 ${escapeHtml(data.d1Break.type)} @ <b>${formatPrice(data.d1Break.close)}</b> · ${formatBreakDate12h(data.d1Break.datetime)}\n` +
+                `D1 tap (${escapeHtml(data.activeTap.label)}) @ <b>${formatPrice(data.activeTap.price)}</b> · ${formatBreakDate12h(data.activeTap.datetime)}${data.activeTap.isDeveloping ? " <i>(developing D1)</i>" : ""}\n` +
+                `<b>${escapeHtml(data.liveTapH4Break.type)}</b> @ <b>${formatPrice(data.liveTapH4Break.price)}</b> · ${formatBreakDate12h(data.liveTapH4Break.datetime)}\n\n` +
                 `Sent ${formatWatTimestamp()}\n\n` +
                 `<i>Not an entry signal — bias context only.</i>`,
               buildStorylineInlineKeyboard(symbol)
@@ -3478,6 +3478,7 @@ const rawH4 = await getMarketCandles(symbol, "4h", 150);
           }
         }
       }
+    } // <-- closes for (const row of activeRows)
     
     hasCompletedInitialSeed = true;
   } catch (err) {
