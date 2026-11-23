@@ -2627,67 +2627,68 @@ app.post("/webhook", async (req, res) => {
         return;
       }
 
-            if (action === "entry") {
-        const [storylineReport, rawH4, rawM30] = await Promise.all([
-          getCachedStorylineReport(symbol),
-          getMarketCandles(symbol, "4h", 150),
-          getMarketCandles(symbol, "30min", 150)
-        ]);
+       if (action === "entry") {
+  const [storylineReport, rawH4, rawM30] = await Promise.all([
+    getCachedStorylineReport(symbol),
+    getMarketCandles(symbol, "4h", 150),
+    getMarketCandles(symbol, "30min", 150)
+  ]);
 
-        const activeBias =
-          storylineReport?.d1Bias && storylineReport.d1Bias !== "NEUTRAL"
-            ? storylineReport.d1Bias
-            : storylineReport?.w1Bias && storylineReport.w1Bias !== "NEUTRAL"
-            ? storylineReport.w1Bias
-            : null;
+  const activeBias =
+    storylineReport?.d1Bias && storylineReport.d1Bias !== "NEUTRAL"
+      ? storylineReport.d1Bias
+      : storylineReport?.w1Bias && storylineReport.w1Bias !== "NEUTRAL"
+      ? storylineReport.w1Bias
+      : null;
 
-        const hasD1Tap = Boolean(
-          storylineReport?.fullMessage &&
-            storylineReport.fullMessage.includes("D1 tap (")
-        );
+  const fullMsg = storylineReport?.fullMessage || "";
+  const hasD1Tap = fullMsg.includes("D1 tap (");
 
-        const tapMatch = storylineReport?.fullMessage
-          ? storylineReport.fullMessage.match(/D1 tap \([^)]+\) @ .*? · ([^\n<]+)/)
-          : null;
-        const d1TapDate = tapMatch ? tapMatch[1].trim() : null;
+  const tapMatch = fullMsg.match(/D1 tap \([^)]+\) @ .*? · ([^\n<]+)/);
+  let d1TapDate = null;
+  if (tapMatch) {
+    const rawTapStr = tapMatch[1].replace(/\(developing D1\)/i, "").trim();
+    const dateOnlyMatch = rawTapStr.match(/^(\d{4}-\d{2}-\d{2})/);
+    d1TapDate = dateOnlyMatch ? dateOnlyMatch[1] : rawTapStr;
+  }
 
-        const entryCheck = detectH4TapAndM30Breakout(rawH4, rawM30, activeBias, {
-          isH4Active: hasD1Tap,
-          d1TapDatetime: d1TapDate,
-          maxH4AgeCandles: 20
-        });
+  const entryCheck = detectH4TapAndM30Breakout(rawH4, rawM30, activeBias, {
+    isH4Active: hasD1Tap,
+    d1TapDatetime: d1TapDate,
+    maxH4AgeCandles: 40
+  });
 
-        if (entryCheck.status === "H4_NOT_ACTIVE") {
-          await sendMessage(
-            chatId,
-            `<b>${symbol} — CONFIRMATION ENTRY (30M)</b>\n\n` +
-              `🔒 <i>H4 is not active yet — waiting for D1 break & key-level tap first.</i>`
-          );
-          return;
-        }
+  if (entryCheck.status === "H4_NOT_ACTIVE") {
+    await sendMessage(
+      chatId,
+      `<b>${symbol} — CONFIRMATION ENTRY (30M)</b>\n\n` +
+        `🔒 <i>H4 is not active yet — waiting for D1 break & key-level tap first.</i>`
+    );
+    return;
+  }
 
-        const h4EboText = entryCheck.h4Ebo
-          ? `✅ H4 External BO (${activeBias}) @ <b>${formatPrice(entryCheck.h4Ebo.close)}</b> · ${formatBreakDate12h(entryCheck.h4Ebo.date)}`
-          : `⏳ H4 External BO (${activeBias}): <i>Waiting for H4 body close beyond prior swing after D1 tap</i>`;
+  const h4EboText = entryCheck.h4Ebo
+    ? `✅ H4 External BO (${activeBias}) @ <b>${formatPrice(entryCheck.h4Ebo.close)}</b> · ${formatBreakDate12h(entryCheck.h4Ebo.date)}`
+    : `⏳ H4 External BO (${activeBias}): <i>Waiting for H4 body close beyond prior swing after D1 tap</i>`;
 
-        const h4TapText = entryCheck.h4Tap
-          ? `✅ H4 Tap (${entryCheck.h4Tap.label}) @ <b>${formatPrice(entryCheck.h4Tap.price)}</b> · ${formatBreakDate12h(entryCheck.h4Tap.datetime)}`
-          : entryCheck.h4Ebo
-          ? `⏳ H4 Tap: <i>Waiting for tap into H4 EBO / key level</i>`
-          : `🔒 H4 Tap: <i>Locked until H4 external BO</i>`;
+  const h4TapText = entryCheck.h4Tap
+    ? `✅ H4 Tap (${entryCheck.h4Tap.label}) @ <b>${formatPrice(entryCheck.h4Tap.price)}</b> · ${formatBreakDate12h(entryCheck.h4Tap.datetime)}`
+    : entryCheck.h4Ebo
+    ? `⏳ H4 Tap: <i>Waiting for tap into H4 EBO / key level</i>`
+    : `🔒 H4 Tap: <i>Locked until H4 external BO</i>`;
 
-        const m30Text = entryCheck.m30Breakout
-          ? `✅ <b>30M Breakout (${entryCheck.m30Breakout.direction})</b> broke <b>${formatPrice(entryCheck.m30Breakout.level)}</b> · closed <b>${formatPrice(entryCheck.m30Breakout.close)}</b> (${formatBreakDate12h(entryCheck.m30Breakout.datetime)})`
-          : entryCheck.h4Tap
-          ? `⏳ <b>30M Breakout (${activeBias}):</b> <i>Watching 30m body closes after H4 tap</i>`
-          : `🔒 <b>30M Breakout:</b> <i>Available once H4 external BO & H4 tap occur</i>`;
+  const m30Text = entryCheck.m30Breakout
+    ? `✅ <b>30M Breakout (${entryCheck.m30Breakout.direction})</b> broke <b>${formatPrice(entryCheck.m30Breakout.level)}</b> · closed <b>${formatPrice(entryCheck.m30Breakout.close)}</b> (${formatBreakDate12h(entryCheck.m30Breakout.datetime)})`
+    : entryCheck.h4Tap
+    ? `⏳ <b>30M Breakout (${activeBias}):</b> <i>Watching 30m body closes after H4 tap</i>`
+    : `🔒 <b>30M Breakout:</b> <i>Available once H4 external BO & H4 tap occur</i>`;
 
-                const targetSummaryLines = [
-    report.weeklyTarget
-      ? `🎯 <b>Weekly Target (${report.weeklyTarget.label}):</b> ${formatPrice(report.weeklyTarget.price)}`
+  const targetSummaryLines = [
+    storylineReport?.weeklyTarget
+      ? `🎯 <b>Weekly Target (${storylineReport.weeklyTarget.label}):</b> ${formatPrice(storylineReport.weeklyTarget.price)}`
       : null,
-    report.dailyTarget
-      ? `📍 <b>Daily Intraday Target (${report.dailyTarget.label}):</b> ${formatPrice(report.dailyTarget.price)}`
+    storylineReport?.dailyTarget
+      ? `📍 <b>Daily Intraday Target (${storylineReport.dailyTarget.label}):</b> ${formatPrice(storylineReport.dailyTarget.price)}`
       : null
   ].filter(Boolean);
 
@@ -2698,15 +2699,14 @@ app.post("/webhook", async (req, res) => {
   await sendMessage(
     chatId,
     `<b>${symbol} - CONFIRMATION ENTRY (30M)</b>\n\n` +
-    `${h4EboText}\n` +
-    `${h4TapText}\n` +
-    `${m30Text}${targetBlock}\n\n` +
-    `<i>Not an entry signal - verify candle close & risk on chart.</i>`
+      `${h4EboText}\n` +
+      `${h4TapText}\n` +
+      `${m30Text}${targetBlock}\n\n` +
+      `<i>Not an entry signal - verify candle close & risk on chart.</i>`
   );
-    return;
-      }
-    }
-
+  return;
+       }
+      
     const message = req.body?.message;
     if (!message || !message.text) return;
 
