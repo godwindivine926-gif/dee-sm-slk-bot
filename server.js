@@ -3515,6 +3515,7 @@ async function runPacedMarketScan({
 
   isMarketScannerRunning = true;
   let matchedCount = 0;
+  const sentPairs = [];
 
   try {
     const recipients = Array.isArray(chatIds) && chatIds.length > 0
@@ -3523,10 +3524,12 @@ async function runPacedMarketScan({
 
     if (!recipients.length) return;
 
-    for (let i = 0; i < MARKET_SCAN_UNIVERSE.length; i++) {
+    const scanList = shuffleMarketUniverse(BASE_MARKET_UNIVERSE);
+
+    for (let i = 0; i < scanList.length; i++) {
       if (matchedCount >= targetCount) break;
 
-      const symbol = normalizeSymbol(MARKET_SCAN_UNIVERSE[i]);
+      const symbol = normalizeSymbol(scanList[i]);
 
       try {
         const rawW1 = await getMarketCandles(symbol, "1week", 100);
@@ -3573,6 +3576,10 @@ async function runPacedMarketScan({
               for (const chatId of recipients) {
                 await sendMessage(chatId, msg, buildStorylineInlineKeyboard(symbol));
               }
+
+              sentPairs.push(
+                `${matchedCount}. ${emoji} <b>${symbol}</b> · ${w1Setup.bias} (${latestBreak.type} @ ${formatPrice(latestBreak.close)})`
+              );
             }
           }
         }
@@ -3580,9 +3587,21 @@ async function runPacedMarketScan({
         console.error(`Market scan failed for ${symbol}:`, err.message);
       }
 
-      if (matchedCount < targetCount && i < MARKET_SCAN_UNIVERSE.length - 1) {
+      if (matchedCount < targetCount && i < scanList.length - 1) {
         await new Promise(resolve => setTimeout(resolve, paceMs));
       }
+    }
+
+    const summaryText = sentPairs.length > 0
+      ? `<b>📋 ${triggerLabel} — SENT PAIRS LIST (${sentPairs.length})</b>\n\n` +
+        `${sentPairs.join("\n")}\n\n` +
+        `Sent ${formatWatTimestamp()}`
+      : `<b>📋 ${triggerLabel} — SENT PAIRS LIST (0)</b>\n\n` +
+        `No qualifying W1 sweep/rejection + aligned D1 breakout pairs matched in this pass.\n\n` +
+        `Sent ${formatWatTimestamp()}`;
+
+    for (const chatId of recipients) {
+      await sendMessage(chatId, summaryText);
     }
   } finally {
     isMarketScannerRunning = false;
