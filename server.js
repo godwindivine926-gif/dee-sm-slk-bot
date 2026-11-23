@@ -2055,7 +2055,7 @@ function buildLiveD1CandlesWithDeveloping(rawD1, completedD1Candles) {
   return [...base, ...extra];
 }
 
-function detectDevelopingD1TapAfterBreak(liveD1Candles, d1State, bias, tolerancePct = 0.0005) {
+function detectDevelopingD1TapAfterBreak(liveD1Candles, d1State, bias, tolerancePct = 0) {
   if (!d1State?.latestBreak || !Array.isArray(liveD1Candles) || liveD1Candles.length === 0) {
     return null;
   }
@@ -2109,7 +2109,7 @@ function detectDevelopingD1TapAfterBreak(liveD1Candles, d1State, bias, tolerance
     }
   }
 
-  // 3. Most recent A-shape / V-shape / open-close key level around the latest breakout
+  // 3. Most recent A-shape / V-shape / open-close key level tied to the latest move
   const recentKeyLevels = Array.isArray(d1State.keyLevels)
     ? d1State.keyLevels
         .filter(kl => {
@@ -2152,18 +2152,17 @@ function detectDevelopingD1TapAfterBreak(liveD1Candles, d1State, bias, tolerance
       const kl = candidateLevels[k];
       if (kl.formedIndex >= 0 && kl.formedIndex >= i) continue;
 
-      const zoneLow = kl.low * (1 - tolerancePct);
-      const zoneHigh = kl.high * (1 + tolerancePct);
+      const padLow = kl.low * (1 - tolerancePct);
+      const padHigh = kl.high * (1 + tolerancePct);
 
-      const overlapsZone = high >= zoneLow && low <= zoneHigh;
-      const directionalReachOk =
+      const actuallyTouched =
         bias === "BULLISH"
-          ? low <= zoneHigh
+          ? low <= padHigh && high >= padLow
           : bias === "BEARISH"
-            ? high >= zoneLow
-            : true;
+            ? high >= padLow && low <= padHigh
+            : high >= padLow && low <= padHigh;
 
-      if (overlapsZone && directionalReachOk) {
+      if (actuallyTouched) {
         return {
           label: kl.label,
           level: kl.price,
@@ -2178,6 +2177,7 @@ function detectDevelopingD1TapAfterBreak(liveD1Candles, d1State, bias, tolerance
 
   return null;
 }
+
 
 function findH4BreakAfterTap(h4Candles, bias, afterTs = null) {
   const afterMs = afterTs === null || afterTs === undefined ? NaN : toTimestampMs(afterTs, false);
