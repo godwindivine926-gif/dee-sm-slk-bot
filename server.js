@@ -1751,8 +1751,9 @@ function formatBreakDate12h(rawDate) {
   const ampm = hour >= 12 ? "PM" : "AM";
   hour = hour % 12;
   if (hour === 0) hour = 12;
+  const hourPart = String(hour).padStart(2, "0");
 
-  return `${datePart} ${hour}:${minutePart} ${ampm} WAT`;
+  return `${datePart} ${hourPart}:${minutePart} ${ampm} WAT`;
 }
 
 function evaluateTfStoryline(candles, opts = {}) {
