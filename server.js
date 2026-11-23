@@ -4148,20 +4148,21 @@ async function runWatchlistDailySummaryAndH4Monitor(chatIds = null) {
                                        
 function maybeRunStartOfWeekScan() {
   const watNow = getWatNow();
-  const watDay = watNow.getUTCDay(); // 1 = Monday
+  const watDay = watNow.getUTCDay(); // 0 = Sunday
   const watHour = watNow.getUTCHours();
-  const weekKey = getMondayUtcDate(watNow.toISOString().slice(0, 10));
+  const weekKey = watNow.toISOString().slice(0, 10);
 
-  if (watDay === 1 && watHour >= 6 && watHour < 12 && lastWeeklyAutoScanKey !== weekKey) {
+  if (watDay === 0 && watHour >= 6 && watHour < 12 && lastWeeklyAutoScanKey !== weekKey) {
     lastWeeklyAutoScanKey = weekKey;
     runPacedMarketScan({
       targetCount: MARKET_SCAN_TARGET_COUNT,
       paceMs: MARKET_SCAN_PAIR_DELAY_MS,
-      triggerLabel: "NEW WEEK MARKET SCAN"
+      triggerLabel: "SUNDAY MORNING MARKET SCAN",
+      allowWeekend: true
     });
   }
-  }
-      
+}
+
 function startWatchlistMonitor() {
   maybeRunStartOfWeekScan();
   runWatchlistDailySummaryAndH4Monitor().catch(err =>
