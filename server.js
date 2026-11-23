@@ -3247,6 +3247,7 @@ const rawH4 = await getMarketCandles(symbol, "4h", 150);
           activeTap: activeTapForMonitor,
           liveTapH4Break
         });
+              } catch (err) {
         console.error(`Monitor fetch error for ${symbol}:`, err.message);
       }
 
