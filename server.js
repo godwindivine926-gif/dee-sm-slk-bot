@@ -2314,16 +2314,12 @@ async function buildStorylineReport(rawSymbol) {
     ? toTimestampMs(activeRetestTap.datetime, false)
     : null;
 
-  let h4Confirmed = null;
-  if (d1State.hasBreak && activeRetestTap && Array.isArray(h4Candles) && effectiveTapTs !== null) {
-    h4Confirmed = findH4BreakAfterTap(h4Candles, d1Bias, effectiveTapTs);
-  }
    const tapTs = validRetestTap?.datetime
     ? toTimestampMs(validRetestTap.datetime, false)
     : null;
   
 const isAtOrAfterTap = evDate => {
-    if (!tapTs || !evDate) return true;
+   if (!tapTs || !evDate) return true;
     const evTs = toTimestampMs(evDate, false);
     return Number.isFinite(evTs) ? evTs >= tapTs : true;
   };
