@@ -3686,28 +3686,36 @@ async function runPacedMarketScan({
             );
 
             if (breakMatchesBias && insideLastWeek) {
-              const setupKey = `${symbol}:${w1Setup.weekDate}:${w1Setup.bias}:${latestBreak.type}:${latestBreak.datetime}`;
-              if (!deliveredWeeklySetups.has(setupKey)) {
-                deliveredWeeklySetups.add(setupKey);
-                matchedCount += 1;
-                
+  const newChatsForSetup = recipients.filter(recipientChatId => {
+    const perChatSetupKey = `${recipientChatId}:${symbol}:${w1Setup.weekDate}:${w1Setup.bias}:${latestBreak.type}:${latestBreak.datetime}`;
+    return !deliveredWeeklySetups.has(perChatSetupKey);
+  });
 
-              const emoji = w1Setup.bias === "BULLISH" ? "🟢" : "🔴";
-              const msg =
-                `${emoji} <b>${triggerLabel} (${matchedCount}/${targetCount}) — ${symbol}</b>\n\n` +
-                `W1: <b>${w1Setup.reason}</b> · ${formatBreakDate12h(w1Setup.weekDate)}\n` +
-                `D1: <b>${latestBreak.type}</b> @ <b>${formatPrice(latestBreak.close)}</b> · ${formatBreakDate12h(latestBreak.datetime)}\n` +
-                `Next: Watch for D1 tap & H4 ${w1Setup.bias} breakout\n\n` +
-                `Sent ${formatWatTimestamp()}\n\n` +
-                `<i>Not an entry signal — bias context only.</i>`;
+  if (newChatsForSetup.length > 0) {
+    for (const recipientChatId of newChatsForSetup) {
+      const perChatSetupKey = `${recipientChatId}:${symbol}:${w1Setup.weekDate}:${w1Setup.bias}:${latestBreak.type}:${latestBreak.datetime}`;
+      deliveredWeeklySetups.add(perChatSetupKey);
+    }
 
-              for (const chatId of recipients) {
-                await sendMessage(chatId, msg, buildStorylineInlineKeyboard(symbol));
-              }
-                sentPairs.push(
-                  `${matchedCount}. ${emoji} <b>${symbol}</b> · ${w1Setup.bias} (${latestBreak.type} @ ${formatPrice(latestBreak.close)})`
-                );
-              }
+    matchedCount += 1;
+
+    const emoji = w1Setup.bias === "BULLISH" ? "🟢" : "🔴";
+    const msg =
+      `${emoji} <b>${triggerLabel} (${matchedCount}/${targetCount}) — ${symbol}</b>\n\n` +
+      `W1: <b>${w1Setup.reason}</b> · ${formatBreakDate12h(w1Setup.weekDate)}\n` +
+      `D1: <b>${latestBreak.type}</b> @ <b>${formatPrice(latestBreak.close)}</b> · ${formatBreakDate12h(latestBreak.datetime)}\n` +
+      `Next: Watch for D1 tap & H4 ${w1Setup.bias} breakout\n\n` +
+      `Sent ${formatWatTimestamp()}\n\n` +
+      `<i>Not an entry signal — bias context only.</i>`;
+
+    for (const recipientChatId of newChatsForSetup) {
+      await sendMessage(recipientChatId, msg, buildStorylineInlineKeyboard(symbol));
+    }
+
+    sentPairs.push(
+      `${matchedCount}. ${emoji} <b>${symbol}</b> · ${w1Setup.bias} (${latestBreak.type} @ ${formatPrice(latestBreak.close)})`
+    );
+  }
             }
           }
         }
