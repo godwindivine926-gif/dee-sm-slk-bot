@@ -195,7 +195,13 @@ function candleColor(candle) {
   if (close < open) return "BEARISH";
   return "DOJI";
 }
-
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+  
 function formatPrice(value) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) {
     return "Not formed";
