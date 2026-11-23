@@ -3678,6 +3678,338 @@ async function runPacedMarketScan({
   }
 }
 
+const dailySummaryStateByPair = new Map();
+const deliveredH4Confirmations = new Set();
+
+function buildDailyBreakoutRange(d1Candles, recentD1Break) {
+  if (!Array.isArray(d1Candles) || d1Candles.length < 2 || !recentD1Break) {
+    return null;
+  }
+
+  const breakPrice = Number(recentD1Break.level ?? recentD1Break.close ?? recentD1Break.price);
+  if (!Number.isFinite(breakPrice)) return null;
+
+  const breakIdx =
+    Number.isInteger(recentD1Break.index) &&
+    recentD1Break.index >= 0 &&
+    recentD1Break.index < d1Candles.length
+      ? recentD1Break.index
+      : d1Candles.length - 1;
+
+  const preBreakIdx = Math.max(0, breakIdx - 1);
+  const preBreakCandle = d1Candles[preBreakIdx];
+
+  const candidatePrices = [
+    breakPrice,
+    Number(preBreakCandle?.open),
+    Number(preBreakCandle?.close)
+  ].filter(Number.isFinite);
+
+  if (candidatePrices.length < 2) return null;
+
+  const rangeLow = Math.min(...candidatePrices);
+  const rangeHigh = Math.max(...candidatePrices);
+
+  return {
+    rangeLow,
+    rangeHigh,
+    breakPrice,
+    breakIdx
+  };
+}
+
+function evaluateDailySummaryInBreakoutRange(
+  d1Candles,
+  storylineBias,
+  d1KeyLevels = [],
+  recentD1Break = null
+) {
+  if (!Array.isArray(d1Candles) || d1Candles.length < 3) return null;
+  if (storylineBias !== "BULLISH" && storylineBias !== "BEARISH") return null;
+
+  const breakoutRange = buildDailyBreakoutRange(d1Candles, recentD1Break);
+  if (!breakoutRange || !Array.isArray(d1KeyLevels) || d1KeyLevels.length === 0) {
+    return null;
+  }
+
+  // Last completed daily candle (previous day)
+  const prevDay = d1Candles[d1Candles.length - 1];
+  const open = Number(prevDay.open);
+  const high = Number(prevDay.high);
+  const low = Number(prevDay.low);
+  const close = Number(prevDay.close);
+  if (![open, high, low, close].every(Number.isFinite)) return null;
+
+  // Direction of the daily close must match the storyline bias
+  const closedInBiasDirection =
+    storylineBias === "BULLISH" ? close > open : close < open;
+  if (!closedInBiasDirection) return null;
+
+  const rangePad = Math.max(
+    (breakoutRange.rangeHigh - breakoutRange.rangeLow) * 0.1,
+    breakoutRange.rangeHigh * 0.0005
+  );
+
+  for (let i = d1KeyLevels.length - 1; i >= 0; i--) {
+    const kl = d1KeyLevels[i];
+    if (!kl) continue;
+
+    const kLow = Math.min(Number(kl.low), Number(kl.high));
+    const kHigh = Math.max(Number(kl.low), Number(kl.high));
+    if (!Number.isFinite(kLow) || !Number.isFinite(kHigh)) continue;
+
+    // Key level must sit inside (or right on the edge of) the daily breakout range
+    const insideRange =
+      kHigh >= breakoutRange.rangeLow - rangePad &&
+      kLow <= breakoutRange.rangeHigh + rangePad;
+    if (!insideRange) continue;
+
+    const tapPad = Math.max((kHigh - kLow) * 0.2, kHigh * 0.0005);
+    const tappedKeyLevel = low <= kHigh + tapPad && high >= kLow - tapPad;
+    if (!tappedKeyLevel) continue;
+
+    const closedOnOrThroughLevel =
+      storylineBias === "BULLISH"
+        ? close >= kLow - tapPad
+        : close <= kHigh + tapPad;
+
+    if (closedOnOrThroughLevel) {
+      return {
+        bias: storylineBias,
+        rangeLow: breakoutRange.rangeLow,
+        rangeHigh: breakoutRange.rangeHigh,
+        keyLevelLow: kLow,
+        keyLevelHigh: kHigh,
+        prevDayDate: prevDay.datetime,
+        prevDayClose: close,
+        reason: `D1 tapped & closed ${storylineBias.toLowerCase()} at key level (${formatPrice(kLow)}–${formatPrice(kHigh)}) inside breakout range (${formatPrice(breakoutRange.rangeLow)}–${formatPrice(breakoutRange.rangeHigh)})`
+      };
+    }
+  }
+
+  return null;
+}
+
+function isWeeklyTargetStillActive(w1Candles, bias) {
+  if (!Array.isArray(w1Candles) || w1Candles.length < 3) return true;
+  const lastClosedWeek = w1Candles[w1Candles.length - 1];
+  const lastPrice = Number(lastClosedWeek?.close);
+  if (!Number.isFinite(lastPrice)) return true;
+
+  const lookback = w1Candles.slice(Math.max(0, w1Candles.length - 8), w1Candles.length - 1);
+  if (!lookback.length) return true;
+
+  if (bias === "BULLISH") {
+    const targetHigh = Math.max(...lookback.map(c => Number(c.high)).filter(Number.isFinite));
+    return Number.isFinite(targetHigh) ? lastPrice < targetHigh : true;
+  }
+
+  if (bias === "BEARISH") {
+    const targetLow = Math.min(...lookback.map(c => Number(c.low)).filter(Number.isFinite));
+    return Number.isFinite(targetLow) ? lastPrice > targetLow : true;
+  }
+
+  return true;
+}
+
+function evaluateH4BreakoutInDirection(h4Candles, bias, sinceTimestamp = null) {
+  if (!Array.isArray(h4Candles) || h4Candles.length < 4) return null;
+  if (bias !== "BULLISH" && bias !== "BEARISH") return null;
+
+  const sinceMs = sinceTimestamp ? Date.parse(String(sinceTimestamp)) : NaN;
+  const swings = identifySwings(h4Candles);
+
+  for (let idx = h4Candles.length - 1; idx >= 1; idx--) {
+    const candle = h4Candles[idx];
+    const close = Number(candle.close);
+    if (!Number.isFinite(close)) continue;
+
+    if (Number.isFinite(sinceMs) && candle.datetime) {
+      const cMs = Date.parse(String(candle.datetime));
+      if (Number.isFinite(cMs) && cMs < sinceMs) break;
+    }
+
+    if (bias === "BULLISH") {
+      const priorHighs = swings.filter(s => s.type === "SWING_HIGH" && s.index < idx);
+      if (!priorHighs.length) continue;
+      const brokenHigh = priorHighs[priorHighs.length - 1];
+      if (close > brokenHigh.level) {
+        return {
+          bias: "BULLISH",
+          confirmed: true,
+          brokenLevel: brokenHigh.level,
+          close,
+          datetime: candle.datetime,
+          summary: `H4 BULLISH breakout above ${formatPrice(brokenHigh.level)} (Close ${formatPrice(close)})`
+        };
+      }
+    }
+
+    if (bias === "BEARISH") {
+      const priorLows = swings.filter(s => s.type === "SWING_LOW" && s.index < idx);
+      if (!priorLows.length) continue;
+      const brokenLow = priorLows[priorLows.length - 1];
+      if (close < brokenLow.level) {
+        return {
+          bias: "BEARISH",
+          confirmed: true,
+          brokenLevel: brokenLow.level,
+          close,
+          datetime: candle.datetime,
+          summary: `H4 BEARISH breakout confirmed below ${formatPrice(brokenLow.level)} (Close ${formatPrice(close)})`
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+function evaluateH4BreakoutConfirmation(h4Candles, dailySummarySetup) {
+  if (!dailySummarySetup || !Array.isArray(h4Candles) || h4Candles.length < 4) {
+    return null;
+  }
+  return evaluateH4BreakoutInDirection(
+    h4Candles,
+    dailySummarySetup.bias,
+    dailySummarySetup.prevDayDate
+  );
+}
+
+async function runWatchlistDailySummaryAndH4Monitor(chatIds = null) {
+  const rows = await databaseRequest("watchlist?is_active=eq.true&select=symbol,chat_id,bias,storyline");
+  if (!Array.isArray(rows) || rows.length === 0) return;
+
+  const groupedBySymbol = new Map();
+  for (const row of rows) {
+    const symbol = normalizeSymbol(row.symbol);
+    if (!symbol) continue;
+
+    if (!groupedBySymbol.has(symbol)) {
+      groupedBySymbol.set(symbol, {
+        symbol,
+        bias: row.bias ? String(row.bias).toUpperCase() : null,
+        chatIds: new Set()
+      });
+    }
+
+    const entry = groupedBySymbol.get(symbol);
+    if (!entry.bias && row.bias) {
+      entry.bias = String(row.bias).toUpperCase();
+    }
+    const parsedChat = parseChatId(row.chat_id);
+    if (parsedChat) entry.chatIds.add(parsedChat);
+  }
+
+  for (const [symbol, item] of groupedBySymbol.entries()) {
+    const recipients =
+      Array.isArray(chatIds) && chatIds.length > 0
+        ? chatIds
+        : [...item.chatIds];
+    if (!recipients.length) continue;
+
+    try {
+      const rawD1 = await getMarketCandles(symbol, "1day", 150);
+      const d1Candles = filterCompletedDailyCandles(rawD1).candles;
+      if (d1Candles.length < 5) continue;
+
+      const d1Structure = detectDailyStructure(d1Candles);
+      const d1State = evaluateTfStoryline(d1Candles, {
+        bias: item.bias,
+        keyLevels: d1Structure?.keyLevels || []
+      });
+
+      const activeBias =
+        item.bias === "BULLISH" || item.bias === "BEARISH"
+          ? item.bias
+          : d1State?.bias;
+
+      if (activeBias !== "BULLISH" && activeBias !== "BEARISH") continue;
+
+      await new Promise(resolve => setTimeout(resolve, 8500));
+      const rawW1 = await getMarketCandles(symbol, "1week", 60);
+      const w1Candles = prepareStorylineCandles(
+        mergeWeeklyCandlesWithDailyFallback(
+          filterCompletedWeeklyCandles(rawW1).candles,
+          d1Candles
+        ),
+        { excludeWeekends: false }
+      );
+
+      if (!isWeeklyTargetStillActive(w1Candles, activeBias)) continue;
+
+      const recentD1Break = d1State?.latestBreak || null;
+      if (!recentD1Break) continue;
+
+      const dailySummary = evaluateDailySummaryInBreakoutRange(
+        d1Candles,
+        activeBias,
+        d1Structure?.keyLevels || [],
+        recentD1Break
+      );
+
+      if (dailySummary) {
+        const summaryKey = `${symbol}:${dailySummary.prevDayDate}:${dailySummary.bias}`;
+        const prevState = dailySummaryStateByPair.get(symbol);
+
+        if (!prevState || prevState.summaryKey !== summaryKey) {
+          dailySummaryStateByPair.set(symbol, {
+            summaryKey,
+            setup: dailySummary,
+            d1CountAtSummary: d1Candles.length
+          });
+
+          const emoji = dailySummary.bias === "BULLISH" ? "🟢" : "🔴";
+          const summaryMsg =
+            `${emoji} <b>DAILY SUMMARY — ${symbol}</b>\n\n` +
+            `Bias: <b>${dailySummary.bias}</b> (Weekly target still active)\n` +
+            `D1: <b>${dailySummary.reason}</b>\n` +
+            `Next: Checking for <b>H4 ${dailySummary.bias} breakout</b> (from prev close or developing D1 candle)\n\n` +
+            `Sent ${formatWatTimestamp()}`;
+
+          for (const chatId of recipients) {
+            await sendMessage(chatId, summaryMsg, buildStorylineInlineKeyboard(symbol));
+          }
+        }
+      }
+
+      const activeSummaryEntry = dailySummaryStateByPair.get(symbol);
+      if (activeSummaryEntry && activeSummaryEntry.setup?.bias === activeBias) {
+        await new Promise(resolve => setTimeout(resolve, 8500));
+        const rawH4 = await getMarketCandles(symbol, "4h", 120);
+        const h4Candles = Array.isArray(rawH4) ? rawH4 : [];
+
+        const h4Break = evaluateH4BreakoutConfirmation(h4Candles, activeSummaryEntry.setup);
+        if (h4Break) {
+          const confirmKey = `${symbol}:${activeSummaryEntry.summaryKey}:${h4Break.datetime}:${h4Break.bias}`;
+          if (!deliveredH4Confirmations.has(confirmKey)) {
+            deliveredH4Confirmations.add(confirmKey);
+
+            const isDevelopingCandleStage = d1Candles.length > activeSummaryEntry.d1CountAtSummary;
+            const stageLabel = isDevelopingCandleStage
+              ? "Developing D1 candle"
+              : "Post-prev-D1 close";
+
+            const emoji = h4Break.bias === "BULLISH" ? "🟢" : "🔴";
+            const confirmMsg =
+              `✅ ${emoji} <b>H4 BREAKOUT CONFIRMED — ${symbol}</b>\n\n` +
+              `Bias: <b>${h4Break.bias}</b> (${stageLabel})\n` +
+              `H4: <b>${h4Break.summary}</b>\n` +
+              `Prev D1 Close: ${formatBreakDate12h(activeSummaryEntry.setup.prevDayDate)}\n\n` +
+              `Sent ${formatWatTimestamp()}`;
+
+            for (const chatId of recipients) {
+              await sendMessage(chatId, confirmMsg, buildStorylineInlineKeyboard(symbol));
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`Watchlist daily summary / H4 monitor failed for ${symbol}:`, err.message);
+    }
+  }
+        }
+                                       
 function maybeRunStartOfWeekScan() {
   const watNow = getWatNow();
   const watDay = watNow.getUTCDay(); // 1 = Monday
@@ -3696,11 +4028,19 @@ function maybeRunStartOfWeekScan() {
       
 function startWatchlistMonitor() {
   maybeRunStartOfWeekScan();
+  runWatchlistDailySummaryAndH4Monitor().catch(err =>
+    console.error("Watchlist daily summary / H4 monitor startup error:", err.message)
+  );
+
   setInterval(() => {
     maybeRunStartOfWeekScan();
     scanWatchlistOnce();
+    runWatchlistDailySummaryAndH4Monitor().catch(err =>
+      console.error("Watchlist daily summary / H4 monitor interval error:", err.message)
+    );
   }, MONITOR_INTERVAL_MS);
 }
+
 
 // =====================================
 // SERVER START
