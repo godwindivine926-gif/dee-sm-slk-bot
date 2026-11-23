@@ -2417,8 +2417,13 @@ const isAtOrAfterTap = evDate => {
   }
 
   let h4Confirmed = null;
-  if (d1State.hasBreak && validRetestTap && Array.isArray(h4Candles) && bodyTapTs !== null) {
-     h4Confirmed = findLatestBodyBreakAfterTap(h4Candles, d1Bias, bodyTapTs);
+  if (
+    d1State.hasBreak &&
+    activeRetestTap &&
+    Array.isArray(h4Candles) &&
+    Number.isFinite(effectiveTapTs)
+  ) {
+    h4Confirmed = findH4BreakAfterTap(h4Candles, d1Bias, effectiveTapTs);
   }
   
   const storylineEmoji = d1Bias === "BULLISH" ? "🟢" : d1Bias === "BEARISH" ? "🔴" : "⚪";
