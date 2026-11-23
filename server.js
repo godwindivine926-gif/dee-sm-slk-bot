@@ -2725,8 +2725,9 @@ let argument = parts[1];
           `- <b>Market reads</b> – use <code>/check GBPUSD</code> for W1, D1 & H4 structure, key levels, and EBOs.\n` +
           `- <b>Watchlist</b> – use <code>/add</code>, <code>/remove</code>, or <code>/watchlist</code> to manage your pairs.\n` +
           `- <b>Monitor control</b> – use <code>/pause</code> or <code>/resume</code> to toggle automated scans.\n\n` +
+        `- <b>Find pairs now</b> – use <code>/scan</code> to scan markets for W1 + D1 breakout setups.\n` +
           `<i>BIAS ≠ ENTRY — market context only, not an entry signal.</i>\n\n` +
-          `Type <code>/help</code> anytime to see all commands or run <code>/check GBPUSD</code> to start.`
+        `Type <code>/help</code> anytime to see all commands or run <code>/check GBPUSD</code> to start.`
       );
       return;
             }
@@ -2741,7 +2742,7 @@ let argument = parts[1];
           `/check GBPUSD - Check W1/D1/H4 & EBOs\n` +
           `/pause - Pause monitoring\n` +
           `/resume - Resume monitoring\n` +
-          `/weekly - Previous week's events`
+          `/weekly - Previous week's events` +
       `/scan - Scan pairs for W1 + D1 setups\n` +
       );
       return;
