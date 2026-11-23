@@ -1787,28 +1787,6 @@ function evaluateTfStoryline(candles, opts = {}) {
     }
   }
 
-  if (pullbackSwing && Number.isFinite(Number(pullbackSwing.level))) {
-    const startIdx = Math.max(ebo ? ebo.index + 1 : 0, Number(pullbackSwing.index ?? 0) + 1);
-    const lvl = Number(pullbackSwing.level);
-
-    for (let i = startIdx; i < candles.length; i++) {
-      const close = Number(candles[i].close);
-      if (Number.isNaN(close)) continue;
-
-      const broke = (bias === "BULLISH" && close > lvl) || (bias === "BEARISH" && close < lvl);
-      if (broke) {
-        ibo = {
-          type: "IBO",
-          level: lvl,
-          close,
-          datetime: candles[i].datetime || candles[i].date,
-          index: i
-        };
-        break;
-      }
-    }
-  }
-
   const latestBreak =
     ebo && ibo ? (ibo.index >= ebo.index ? ibo : ebo) : ibo || ebo || null;
 
