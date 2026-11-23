@@ -3969,11 +3969,23 @@ function evaluateH4BreakoutInDirection(h4Candles, bias, sinceTimestamp = null) {
 }
 
 function evaluateH4BreakoutConfirmation(h4Candles, dailySummarySetup) {
-  if (!dailySummarySetup || !Array.isArray(h4Candles) || h4Candles.length < 4) {
+  if (!dailySummarySetup || !Array.isArray(h4Candles) || h4Candles.length === 0) {
     return null;
   }
+
+  // Filter out unclosed candles when a closed flag is present
+  const closedCandles = h4Candles.filter((c) => {
+    if (!c || typeof c !== "object") return false;
+    if (typeof c.isClosed === "boolean") return c.isClosed;
+    if (typeof c.closed === "boolean") return c.closed;
+    if (typeof c.is_final === "boolean") return c.is_final;
+    return true;
+  });
+
+  if (closedCandles.length === 0) return null;
+
   return evaluateH4BreakoutInDirection(
-    h4Candles,
+    closedCandles,
     dailySummarySetup.bias,
     dailySummarySetup.prevDayDate
   );
