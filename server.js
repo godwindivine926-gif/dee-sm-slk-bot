@@ -3893,11 +3893,17 @@ function isWeeklyTargetStillActive(w1Candles, bias) {
   return true;
 }
 
-function evaluateH4BreakoutInDirection(h4Candles, bias, sinceTimestamp = null) {
+function evaluateH4BreakoutInDirection(
+  h4Candles,
+  bias,
+  sinceTimestamp,
+  minTimestamp = null
+) {
   if (!Array.isArray(h4Candles) || h4Candles.length < 3) return null;
   if (bias !== "BULLISH" && bias !== "BEARISH") return null;
 
   const sinceMs = sinceTimestamp ? Date.parse(String(sinceTimestamp)) : NaN;
+  const minMs = minTimestamp ? Date.parse(String(minTimestamp)) : NaN;
   const swings = typeof identifySwings === "function" ? identifySwings(h4Candles) : [];
 
   for (let idx = h4Candles.length - 1; idx >= 2; idx--) {
@@ -3905,11 +3911,13 @@ function evaluateH4BreakoutInDirection(h4Candles, bias, sinceTimestamp = null) {
     const close = Number(candle.close);
     if (!Number.isFinite(close)) continue;
 
-    if (Number.isFinite(sinceMs) && candle.datetime) {
+    if (candle.datetime) {
       const cMs = Date.parse(String(candle.datetime));
-      if (Number.isFinite(cMs) && cMs < sinceMs) break;
+      if (Number.isFinite(sinceMs) && Number.isFinite(cMs) && cMs < sinceMs) break;
+      // Skip H4 candles at or before a developing D1 tap timestamp
+      if (Number.isFinite(minMs) && Number.isFinite(cMs) && cMs <= minMs) continue;
     }
-
+    
     if (bias === "BULLISH") {
       const priorHighs = swings
         .filter(s => s.type === "SWING_HIGH" && s.index < idx)
