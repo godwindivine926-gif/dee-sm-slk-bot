@@ -3495,7 +3495,7 @@ const BASE_MARKET_UNIVERSE = [
   "XAU/USD", "XAG/USD",
 
   // Indices (4)
-  "NDX", "DJI", "DAX", "N225",
+  "NDX", "DAX", "N225",
 
   // Forex Majors (7)
   "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD", "NZD/USD",
@@ -3519,7 +3519,7 @@ function shuffleMarketUniverse(list) {
 }
 
 const MARKET_SCAN_TARGET_COUNT = 15;
-const MARKET_SCAN_PAIR_DELAY_MS = 65000;
+const MARKET_SCAN_PAIR_DELAY_MS = 90000;
 
 let isMarketScannerRunning = false;
 let lastWeeklyAutoScanKey = null;
