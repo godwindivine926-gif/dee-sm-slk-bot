@@ -3813,13 +3813,13 @@ function isWeeklyTargetStillActive(w1Candles, bias) {
 }
 
 function evaluateH4BreakoutInDirection(h4Candles, bias, sinceTimestamp = null) {
-  if (!Array.isArray(h4Candles) || h4Candles.length < 4) return null;
+  if (!Array.isArray(h4Candles) || h4Candles.length < 3) return null;
   if (bias !== "BULLISH" && bias !== "BEARISH") return null;
 
   const sinceMs = sinceTimestamp ? Date.parse(String(sinceTimestamp)) : NaN;
-  const swings = identifySwings(h4Candles);
+  const swings = typeof identifySwings === "function" ? identifySwings(h4Candles) : [];
 
-  for (let idx = h4Candles.length - 1; idx >= 1; idx--) {
+  for (let idx = h4Candles.length - 1; idx >= 2; idx--) {
     const candle = h4Candles[idx];
     const close = Number(candle.close);
     if (!Number.isFinite(close)) continue;
@@ -3830,33 +3830,55 @@ function evaluateH4BreakoutInDirection(h4Candles, bias, sinceTimestamp = null) {
     }
 
     if (bias === "BULLISH") {
-      const priorHighs = swings.filter(s => s.type === "SWING_HIGH" && s.index < idx);
-      if (!priorHighs.length) continue;
-      const brokenHigh = priorHighs[priorHighs.length - 1];
-      if (close > brokenHigh.level) {
+      const priorHighs = swings
+        .filter(s => s.type === "SWING_HIGH" && s.index < idx)
+        .map(s => Number(s.level))
+        .filter(Number.isFinite);
+
+      const recentCandleHighs = h4Candles
+        .slice(Math.max(0, idx - 6), idx)
+        .map(c => Number(c.high))
+        .filter(Number.isFinite);
+
+      const targetHigh = priorHighs.length
+        ? priorHighs[priorHighs.length - 1]
+        : (recentCandleHighs.length ? Math.max(...recentCandleHighs) : NaN);
+
+      if (Number.isFinite(targetHigh) && close > targetHigh) {
         return {
           bias: "BULLISH",
           confirmed: true,
-          brokenLevel: brokenHigh.level,
+          brokenLevel: targetHigh,
           close,
           datetime: candle.datetime,
-          summary: `H4 BULLISH breakout above ${formatPrice(brokenHigh.level)} (Close ${formatPrice(close)})`
+          summary: `H4 BULLISH breakout confirmed above ${formatPrice(targetHigh)} (Close ${formatPrice(close)})`
         };
       }
     }
 
     if (bias === "BEARISH") {
-      const priorLows = swings.filter(s => s.type === "SWING_LOW" && s.index < idx);
-      if (!priorLows.length) continue;
-      const brokenLow = priorLows[priorLows.length - 1];
-      if (close < brokenLow.level) {
+      const priorLows = swings
+        .filter(s => s.type === "SWING_LOW" && s.index < idx)
+        .map(s => Number(s.level))
+        .filter(Number.isFinite);
+
+      const recentCandleLows = h4Candles
+        .slice(Math.max(0, idx - 6), idx)
+        .map(c => Number(c.low))
+        .filter(Number.isFinite);
+
+      const targetLow = priorLows.length
+        ? priorLows[priorLows.length - 1]
+        : (recentCandleLows.length ? Math.min(...recentCandleLows) : NaN);
+
+      if (Number.isFinite(targetLow) && close < targetLow) {
         return {
           bias: "BEARISH",
           confirmed: true,
-          brokenLevel: brokenLow.level,
+          brokenLevel: targetLow,
           close,
           datetime: candle.datetime,
-          summary: `H4 BEARISH breakout confirmed below ${formatPrice(brokenLow.level)} (Close ${formatPrice(close)})`
+          summary: `H4 BEARISH breakout confirmed below ${formatPrice(targetLow)} (Close ${formatPrice(close)})`
         };
       }
     }
