@@ -2742,7 +2742,7 @@ let argument = parts[1];
           `/pause - Pause monitoring\n` +
           `/resume - Resume monitoring\n` +
           `/weekly - Previous week's events`
-        `- <b>Find pairs now</b> – use <code>/scan</code> to scan markets for W1 + D1 breakout setups.\n`
+      `/scan - Scan pairs for W1 + D1 setups\n` +
       );
       return;
         }
