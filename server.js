@@ -2425,6 +2425,12 @@ const isAtOrAfterTap = evDate => {
   ) {
     h4Confirmed = findH4BreakAfterTap(h4Candles, d1Bias, effectiveTapTs);
   }
+    console.log("NZD/CAD H4 debug:", {
+    d1Bias,
+    effectiveTapTs,
+    lastH4: h4Candles?.slice(-4),
+    h4Confirmed
+  });
   
   const storylineEmoji = d1Bias === "BULLISH" ? "🟢" : d1Bias === "BEARISH" ? "🔴" : "⚪";
   const storylineDir = d1Bias === "BULLISH" ? "BULLISH" : d1Bias === "BEARISH" ? "BEARISH" : "NEUTRAL";
