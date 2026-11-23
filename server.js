@@ -2119,6 +2119,19 @@ function findH4BreakAfterTap(h4Candles, bias, afterTs = null) {
   const afterMs = afterTs === null || afterTs === undefined ? NaN : toTimestampMs(afterTs, false);
   if (!Number.isFinite(afterMs) || !Array.isArray(h4Candles) || h4Candles.length < 3) {
     return null;
+    console.log("findH4BreakAfterTap check:", {
+    bias,
+    afterMs,
+    recentCandles: h4Candles.slice(-3).map((c) => {
+      const dt = c.datetime || c.date;
+      return {
+        dt,
+        cTs: dt ? toTimestampMs(dt, false) : NaN,
+        close: Number(c.close),
+        bot: bodyBottom(c)
+      };
+    })
+  });
   }
 
   const isBull = bias === "BULLISH";
