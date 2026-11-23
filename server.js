@@ -3980,8 +3980,8 @@ function evaluateH4BreakoutConfirmation(h4Candles, dailySummarySetup) {
 }
 
 async function runWatchlistDailySummaryAndH4Monitor(chatIds = null) {
-  const rows = await databaseRequest("watchlist?is_active=eq.true&select=symbol,chat_id,bias,storyline");
-  if (!Array.isArray(rows) || rows.length === 0) return;
+  const rows = await databaseRequest("watchlist?is_active=eq.true&select=symbol,chat_id,bias");
+   if (!Array.isArray(rows) || rows.length === 0) return;
 
   const groupedBySymbol = new Map();
   for (const row of rows) {
