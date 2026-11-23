@@ -3646,17 +3646,17 @@ async function runPacedMarketScan({
               for (const chatId of recipients) {
                 await sendMessage(chatId, msg, buildStorylineInlineKeyboard(symbol));
               }
-
-              sentPairs.push(
-                `${matchedCount}. ${emoji} <b>${symbol}</b> · ${w1Setup.bias} (${latestBreak.type} @ ${formatPrice(latestBreak.close)})`
-              );
+                sentPairs.push(
+                  `${matchedCount}. ${emoji} <b>${symbol}</b> · ${w1Setup.bias} (${latestBreak.type} @ ${formatPrice(latestBreak.close)})`
+                );
+              }
             }
           }
         }
       } catch (err) {
         console.error(`Market scan failed for ${symbol}:`, err.message);
       }
-
+      
       if (matchedCount < targetCount && i < scanList.length - 1) {
         await new Promise(resolve => setTimeout(resolve, paceMs));
       }
