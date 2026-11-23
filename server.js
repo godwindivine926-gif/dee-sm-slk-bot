@@ -2090,6 +2090,13 @@ function detectDevelopingD1TapAfterBreak(liveD1Candles, d1State, bias, tolerance
     const bOpen = Number(breakCandle.open);
     const bClose = Number(breakCandle.close);
     if (Number.isFinite(bOpen)) {
+        console.log("D1 tap debug:", {
+    latestBreak,
+    breakCandle,
+    devCandle: liveD1Candles[liveD1Candles.length - 1],
+    candidateLevels
+  });
+      
       candidateLevels.push({
         label: "RECENT BO OPEN",
         low: bOpen,
