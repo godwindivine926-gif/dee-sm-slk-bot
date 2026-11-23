@@ -2742,6 +2742,7 @@ let argument = parts[1];
           `/pause - Pause monitoring\n` +
           `/resume - Resume monitoring\n` +
           `/weekly - Previous week's events`
+        `- <b>Find pairs now</b> – use <code>/scan</code> to scan markets for W1 + D1 breakout setups.\n`
       );
       return;
         }
@@ -2755,7 +2756,35 @@ let argument = parts[1];
   );
   return;
 }
+    
+if (command === "/scan") {
+  if (isMarketScannerRunning) {
+    await sendMessage(
+      chatId,
+      "⏳ A market scan is already in progress. Please wait a moment for the results."
+    );
+    return;
+  }
 
+  await sendMessage(
+    chatId,
+    `🔍 <b>Starting Market Scan...</b>\n` +
+      `Scanning for W1 close/key-level setups with aligned D1 breakouts.\n` +
+      `<i>This runs paced to protect API limits—matching pairs will arrive one by one.</i>`
+  );
+
+  runPacedMarketScan({
+    targetCount: MARKET_SCAN_TARGET_COUNT,
+    paceMs: MARKET_SCAN_PAIR_DELAY_MS,
+    chatIds: [chatId],
+    triggerLabel: "MARKET SCAN"
+  }).catch(err => {
+    console.error("Manual /scan error:", err.message);
+  });
+
+  return;
+}
+    
 if (command === "/bias" || command === "/bais") {
   if (argument) {
     const symbol = normalizeSymbol(argument);
