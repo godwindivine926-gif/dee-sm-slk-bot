@@ -3446,52 +3446,112 @@ let isMarketScannerRunning = false;
 let lastWeeklyAutoScanKey = null;
 const deliveredWeeklySetups = new Set();
 
-function evaluateWeeklySweepOrRejection(w1Candles) {
+function evaluateLastWeekCloseSetup(w1Candles, d1KeyLevels = []) {
   if (!Array.isArray(w1Candles) || w1Candles.length < 3) return null;
 
   const prevWeek = w1Candles[w1Candles.length - 2];
-  const latestWeek = w1Candles[w1Candles.length - 1];
+  const lastWeek = w1Candles[w1Candles.length - 1];
 
   const prevHigh = Number(prevWeek.high);
   const prevLow = Number(prevWeek.low);
-  const latestOpen = Number(latestWeek.open);
-  const latestHigh = Number(latestWeek.high);
-  const latestLow = Number(latestWeek.low);
-  const latestClose = Number(latestWeek.close);
+  const lastOpen = Number(lastWeek.open);
+  const lastHigh = Number(lastWeek.high);
+  const lastLow = Number(lastWeek.low);
+  const lastClose = Number(lastWeek.close);
 
-  if (![prevHigh, prevLow, latestOpen, latestHigh, latestLow, latestClose].every(Number.isFinite)) {
+  if (![prevHigh, prevLow, lastOpen, lastHigh, lastLow, lastClose].every(Number.isFinite)) {
     return null;
   }
 
-  // Bearish weekly sweep / rejection: swept prior weekly high and rejected/closed below it
-  if (latestHigh > prevHigh && latestClose < prevHigh) {
+  // Bearish: swept prior weekly high and last week closed below prior weekly high
+  if (lastHigh > prevHigh && lastClose < prevHigh) {
     return {
       bias: "BEARISH",
-      reason: `W1 High Sweep & Reject (${formatPrice(prevHigh)})`,
-      weekDate: latestWeek.datetime
+      reason: `Last W1 Close Below Prior High (${formatPrice(lastClose)} < ${formatPrice(prevHigh)})`,
+      weekDate: lastWeek.datetime,
+      lastWeek
     };
   }
 
-  // Bullish weekly sweep / rejection: swept prior weekly low and rejected/closed above it
-  if (latestLow < prevLow && latestClose > prevLow) {
+  // Bullish: swept prior weekly low and last week closed above prior weekly low
+  if (lastLow < prevLow && lastClose > prevLow) {
     return {
       bias: "BULLISH",
-      reason: `W1 Low Sweep & Reject (${formatPrice(prevLow)})`,
-      weekDate: latestWeek.datetime
+      reason: `Last W1 Close Above Prior Low (${formatPrice(lastClose)} > ${formatPrice(prevLow)})`,
+      weekDate: lastWeek.datetime,
+      lastWeek
     };
   }
 
-  const story = detectWeeklyStoryline(w1Candles);
-  if (story && (story.bias === "BULLISH" || story.bias === "BEARISH")) {
+  // Check if last week's close respected/reacted at a relevant key level
+  const matchingKeyLevel = Array.isArray(d1KeyLevels)
+    ? [...d1KeyLevels]
+        .reverse()
+        .find(kl => {
+          if (!kl) return false;
+          const kLow = Math.min(Number(kl.low), Number(kl.high));
+          const kHigh = Math.max(Number(kl.low), Number(kl.high));
+          if (!Number.isFinite(kLow) || !Number.isFinite(kHigh)) return false;
+          const pad = Math.max((kHigh - kLow) * 0.15, kHigh * 0.0005);
+          return lastClose >= kLow - pad && lastClose <= kHigh + pad;
+        })
+    : null;
+
+  if (matchingKeyLevel) {
+    const inferredBias =
+      matchingKeyLevel.bias === "BULLISH" || matchingKeyLevel.bias === "BEARISH"
+        ? matchingKeyLevel.bias
+        : lastClose >= lastOpen
+          ? "BULLISH"
+          : "BEARISH";
+
     return {
-      bias: story.bias,
-      reason: `${story.formation} (${story.bias})`,
-      weekDate: story.reaction_date || latestWeek.datetime
+      bias: inferredBias,
+      reason: `Last W1 Close @ Key Level (${formatPrice(lastClose)})`,
+      weekDate: lastWeek.datetime,
+      lastWeek
     };
   }
 
   return null;
 }
+
+function isBreakInsideLastWeekCandle(latestBreak, lastWeek, d1Candles) {
+  if (!latestBreak || !lastWeek) return false;
+
+  const breakDateStr = latestBreak.datetime ? String(latestBreak.datetime).slice(0, 10) : "";
+  const lastWeekDateStr = lastWeek.datetime ? String(lastWeek.datetime).slice(0, 10) : "";
+
+  if (!breakDateStr || !lastWeekDateStr) return false;
+
+  const breakMs = Date.parse(`${breakDateStr}T00:00:00Z`);
+  const weekStartMs = Date.parse(`${lastWeekDateStr}T00:00:00Z`);
+  // Standard weekly candle spans 7 days from its weekly open date
+  const weekEndMs = weekStartMs + 7 * 24 * 60 * 60 * 1000;
+
+  if (!Number.isFinite(breakMs) || !Number.isFinite(weekStartMs)) return false;
+
+  const inWeekWindow = breakMs >= weekStartMs && breakMs <= weekEndMs;
+  if (!inWeekWindow) return false;
+
+  // Also ensure the breakout price itself stays within last week's high/low range
+  const breakLevel = Number(latestBreak.level ?? latestBreak.price);
+  const breakClose = Number(latestBreak.close);
+  const wHigh = Number(lastWeek.high);
+  const wLow = Number(lastWeek.low);
+
+  if (Number.isFinite(wHigh) && Number.isFinite(wLow)) {
+    const pad = (wHigh - wLow) * 0.02;
+    if (Number.isFinite(breakClose) && (breakClose > wHigh + pad || breakClose < wLow - pad)) {
+      return false;
+    }
+    if (Number.isFinite(breakLevel) && (breakLevel > wHigh + pad || breakLevel < wLow - pad)) {
+      return false;
+    }
+  }
+
+  return Array.isArray(d1Candles) && d1Candles.length >= 2;
+                 }
 
 async function getActiveTargetChatIds() {
   try {
@@ -3535,6 +3595,7 @@ async function runPacedMarketScan({
         const rawW1 = await getMarketCandles(symbol, "1week", 100);
         await new Promise(resolve => setTimeout(resolve, 8500));
         const rawD1 = await getMarketCandles(symbol, "1day", 150);
+        
 
         const d1Candles = filterCompletedDailyCandles(rawD1).candles;
         const mergedW1 = mergeWeeklyCandlesWithDailyFallback(
@@ -3543,26 +3604,35 @@ async function runPacedMarketScan({
         );
         const w1Candles = prepareStorylineCandles(mergedW1, { excludeWeekends: false });
 
-        const w1Setup = evaluateWeeklySweepOrRejection(w1Candles);
-        if (w1Setup && d1Candles.length >= 5) {
+                if (d1Candles.length >= 5) {
           const d1Structure = detectDailyStructure(d1Candles);
-          const d1State = evaluateTfStoryline(d1Candles, {
-            bias: w1Setup.bias,
-            keyLevels: d1Structure?.keyLevels || []
-          });
+          const w1Setup = evaluateLastWeekCloseSetup(w1Candles, d1Structure?.keyLevels || []);
 
-          const latestBreak = d1State?.latestBreak;
-          const breakMatchesBias =
-            Boolean(latestBreak) &&
-            (!d1Structure?.direction ||
-              d1Structure.direction === "UNCONFIRMED" ||
-              d1Structure.direction === w1Setup.bias);
+          if (w1Setup) {
+            const d1State = evaluateTfStoryline(d1Candles, {
+              bias: w1Setup.bias,
+              keyLevels: d1Structure?.keyLevels || []
+            });
 
-          if (breakMatchesBias) {
-            const setupKey = `${symbol}:${w1Setup.weekDate}:${w1Setup.bias}:${latestBreak.type}:${latestBreak.datetime}`;
-            if (!deliveredWeeklySetups.has(setupKey)) {
-              deliveredWeeklySetups.add(setupKey);
-              matchedCount += 1;
+            const latestBreak = d1State?.latestBreak;
+            const breakMatchesBias =
+              Boolean(latestBreak) &&
+              (!d1Structure?.direction ||
+                d1Structure.direction === "UNCONFIRMED" ||
+                d1Structure.direction === w1Setup.bias);
+
+            const insideLastWeek = isBreakInsideLastWeekCandle(
+              latestBreak,
+              w1Setup.lastWeek,
+              d1Candles
+            );
+
+            if (breakMatchesBias && insideLastWeek) {
+              const setupKey = `${symbol}:${w1Setup.weekDate}:${w1Setup.bias}:${latestBreak.type}:${latestBreak.datetime}`;
+              if (!deliveredWeeklySetups.has(setupKey)) {
+                deliveredWeeklySetups.add(setupKey);
+                matchedCount += 1;
+                
 
               const emoji = w1Setup.bias === "BULLISH" ? "🟢" : "🔴";
               const msg =
