@@ -2055,8 +2055,8 @@ function buildLiveD1CandlesWithDeveloping(rawD1, completedD1Candles) {
   return [...base, ...extra];
 }
 
-function detectDevelopingD1TapAfterBreak(liveD1Candles, d1State, bias, tolerancePct = 0) {
-  if (!d1State?.latestBreak || !Array.isArray(liveD1Candles) || liveD1Candles.length === 0) {
+function detectDevelopingD1TapAfterBreak(liveD1Candles, d1State, bias) {
+  if (!d1State?.latestBreak || !Array.isArray(liveD1Candles) || liveD1Candles.length < 2) {
     return null;
   }
 
@@ -2064,13 +2064,19 @@ function detectDevelopingD1TapAfterBreak(liveD1Candles, d1State, bias, tolerance
   const breakIdx = Number.isFinite(Number(latestBreak.index))
     ? Number(latestBreak.index)
     : -1;
-  const breakTs = latestBreak.datetime
-    ? toTimestampMs(latestBreak.datetime, false)
-    : NaN;
   const breakLevel = Number(latestBreak.level ?? latestBreak.price);
-  const breakCandle = breakIdx >= 0 && breakIdx < liveD1Candles.length
-    ? liveD1Candles[breakIdx]
-    : null;
+  const breakClose = Number(latestBreak.close);
+  const breakCandle =
+    breakIdx >= 0 && breakIdx < liveD1Candles.length ? liveD1Candles[breakIdx] : null;
+
+  // Focus specifically on the developing D1 candle (the last bar in liveD1Candles)
+  const devIndex = liveD1Candles.length - 1;
+  if (breakIdx >= 0 && devIndex <= breakIdx) return null;
+
+  const devCandle = liveD1Candles[devIndex];
+  const devHigh = Number(devCandle?.high);
+  const devLow = Number(devCandle?.low);
+  if (!Number.isFinite(devHigh) || !Number.isFinite(devLow)) return null;
 
   const candidateLevels = [];
 
@@ -2085,18 +2091,20 @@ function detectDevelopingD1TapAfterBreak(liveD1Candles, d1State, bias, tolerance
     });
   }
 
-  // 2. Open / close levels of the most recent breakout move
+  // 2. Most recent breakout candle open / close levels
+  if (Number.isFinite(breakClose)) {
+    candidateLevels.push({
+      label: "RECENT BO CLOSE",
+      low: breakClose,
+      high: breakClose,
+      price: breakClose,
+      formedIndex: breakIdx
+    });
+  }
   if (breakCandle) {
     const bOpen = Number(breakCandle.open);
     const bClose = Number(breakCandle.close);
     if (Number.isFinite(bOpen)) {
-        console.log("D1 tap debug:", {
-    latestBreak,
-    breakCandle,
-    devCandle: liveD1Candles[liveD1Candles.length - 1],
-    candidateLevels
-  });
-      
       candidateLevels.push({
         label: "RECENT BO OPEN",
         low: bOpen,
@@ -2122,10 +2130,10 @@ function detectDevelopingD1TapAfterBreak(liveD1Candles, d1State, bias, tolerance
         .filter(kl => {
           if (!kl) return false;
           const fIdx = Number(kl.formation_index);
-          if (!Number.isFinite(fIdx)) return false;
+          if (!Number.isFinite(fIdx) || fIdx >= devIndex) return false;
           const biasOk = !bias || bias === "NEUTRAL" || !kl.bias || kl.bias === bias;
-          const nearLatestMove = breakIdx < 0 || fIdx >= Math.max(0, breakIdx - 4);
-          return biasOk && nearLatestMove;
+          const nearLatestBreak = breakIdx < 0 || fIdx >= Math.max(0, breakIdx - 3);
+          return biasOk && nearLatestBreak;
         })
         .slice(-2)
     : [];
@@ -2144,47 +2152,33 @@ function detectDevelopingD1TapAfterBreak(liveD1Candles, d1State, bias, tolerance
     }
   }
 
-  if (candidateLevels.length === 0) return null;
+  // Check from most specific/recent level backward
+  for (let k = candidateLevels.length - 1; k >= 0; k--) {
+    const kl = candidateLevels[k];
+    if (kl.formedIndex >= 0 && kl.formedIndex >= devIndex) continue;
 
-  for (let i = Math.max(0, breakIdx + 1); i < liveD1Candles.length; i++) {
-    const c = liveD1Candles[i];
-    const cTs = c.datetime ? toTimestampMs(c.datetime, false) : NaN;
-    if (Number.isFinite(breakTs) && Number.isFinite(cTs) && cTs < breakTs) continue;
+    // Require actual physical reach into the level from the pullback side
+    const physicalTouch =
+      bias === "BULLISH"
+        ? devLow <= kl.high && devHigh >= kl.low
+        : bias === "BEARISH"
+          ? devHigh >= kl.low && devLow <= kl.high
+          : devLow <= kl.high && devHigh >= kl.low;
 
-    const high = Number(c.high);
-    const low = Number(c.low);
-    if (!Number.isFinite(high) || !Number.isFinite(low)) continue;
-
-    for (let k = candidateLevels.length - 1; k >= 0; k--) {
-      const kl = candidateLevels[k];
-      if (kl.formedIndex >= 0 && kl.formedIndex >= i) continue;
-
-      const padLow = kl.low * (1 - tolerancePct);
-      const padHigh = kl.high * (1 + tolerancePct);
-
-      const actuallyTouched =
-        bias === "BULLISH"
-          ? low <= padHigh && high >= padLow
-          : bias === "BEARISH"
-            ? high >= padLow && low <= padHigh
-            : high >= padLow && low <= padHigh;
-
-      if (actuallyTouched) {
-        return {
-          label: kl.label,
-          level: kl.price,
-          price: kl.price,
-          datetime: c.datetime || c.date,
-          index: i,
-          isDeveloping: i >= liveD1Candles.length - 1
-        };
-      }
+    if (physicalTouch) {
+      return {
+        label: kl.label,
+        level: kl.price,
+        price: kl.price,
+        datetime: devCandle.datetime || devCandle.date,
+        index: devIndex,
+        isDeveloping: true
+      };
     }
   }
 
   return null;
 }
-
 
 function findH4BreakAfterTap(h4Candles, bias, afterTs = null) {
   const afterMs = afterTs === null || afterTs === undefined ? NaN : toTimestampMs(afterTs, false);
@@ -3428,8 +3422,186 @@ const rawH4 = await getMarketCandles(symbol, "4h", 150);
   }
 }
 
+const MARKET_SCAN_UNIVERSE = [
+  "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "USD/CAD", "AUD/USD", "NZD/USD",
+  "EUR/GBP", "EUR/JPY", "EUR/AUD", "EUR/NZD", "EUR/CAD", "EUR/CHF",
+  "GBP/JPY", "GBP/AUD", "GBP/NZD", "GBP/CAD", "GBP/CHF",
+  "AUD/JPY", "AUD/NZD", "AUD/CAD", "AUD/CHF",
+  "NZD/JPY", "NZD/CAD", "NZD/CHF",
+  "CAD/JPY", "CAD/CHF", "CHF/JPY",
+  "XAU/USD", "BTC/USD"
+];
+
+const MARKET_SCAN_TARGET_COUNT = 7;
+const MARKET_SCAN_PAIR_DELAY_MS = 65000;
+
+let isMarketScannerRunning = false;
+let lastWeeklyAutoScanKey = null;
+const deliveredWeeklySetups = new Set();
+
+function evaluateWeeklySweepOrRejection(w1Candles) {
+  if (!Array.isArray(w1Candles) || w1Candles.length < 3) return null;
+
+  const prevWeek = w1Candles[w1Candles.length - 2];
+  const latestWeek = w1Candles[w1Candles.length - 1];
+
+  const prevHigh = Number(prevWeek.high);
+  const prevLow = Number(prevWeek.low);
+  const latestOpen = Number(latestWeek.open);
+  const latestHigh = Number(latestWeek.high);
+  const latestLow = Number(latestWeek.low);
+  const latestClose = Number(latestWeek.close);
+
+  if (![prevHigh, prevLow, latestOpen, latestHigh, latestLow, latestClose].every(Number.isFinite)) {
+    return null;
+  }
+
+  // Bearish weekly sweep / rejection: swept prior weekly high and rejected/closed below it
+  if (latestHigh > prevHigh && latestClose < prevHigh) {
+    return {
+      bias: "BEARISH",
+      reason: `W1 High Sweep & Reject (${formatPrice(prevHigh)})`,
+      weekDate: latestWeek.datetime
+    };
+  }
+
+  // Bullish weekly sweep / rejection: swept prior weekly low and rejected/closed above it
+  if (latestLow < prevLow && latestClose > prevLow) {
+    return {
+      bias: "BULLISH",
+      reason: `W1 Low Sweep & Reject (${formatPrice(prevLow)})`,
+      weekDate: latestWeek.datetime
+    };
+  }
+
+  const story = detectWeeklyStoryline(w1Candles);
+  if (story && (story.bias === "BULLISH" || story.bias === "BEARISH")) {
+    return {
+      bias: story.bias,
+      reason: `${story.formation} (${story.bias})`,
+      weekDate: story.reaction_date || latestWeek.datetime
+    };
+  }
+
+  return null;
+}
+
+async function getActiveTargetChatIds() {
+  try {
+    const rows = await databaseRequest("watchlist?is_active=eq.true&select=chat_id");
+    if (!Array.isArray(rows)) return [];
+    return [...new Set(rows.map(r => parseChatId(r.chat_id)).filter(Boolean))];
+  } catch (err) {
+    console.warn("Could not load target chat IDs for market scan:", err.message);
+    return [];
+  }
+}
+
+async function runPacedMarketScan({
+  targetCount = MARKET_SCAN_TARGET_COUNT,
+  paceMs = MARKET_SCAN_PAIR_DELAY_MS,
+  chatIds = null,
+  triggerLabel = "WEEKLY MARKET SCAN"
+} = {}) {
+  if (isMarketScannerRunning) return;
+  if (!isWeekdayInWat()) return;
+
+  isMarketScannerRunning = true;
+  let matchedCount = 0;
+
+  try {
+    const recipients = Array.isArray(chatIds) && chatIds.length > 0
+      ? chatIds
+      : await getActiveTargetChatIds();
+
+    if (!recipients.length) return;
+
+    for (let i = 0; i < MARKET_SCAN_UNIVERSE.length; i++) {
+      if (matchedCount >= targetCount) break;
+
+      const symbol = normalizeSymbol(MARKET_SCAN_UNIVERSE[i]);
+
+      try {
+        const rawW1 = await getMarketCandles(symbol, "1week", 100);
+        await new Promise(resolve => setTimeout(resolve, 8500));
+        const rawD1 = await getMarketCandles(symbol, "1day", 150);
+
+        const d1Candles = filterCompletedDailyCandles(rawD1).candles;
+        const mergedW1 = mergeWeeklyCandlesWithDailyFallback(
+          filterCompletedWeeklyCandles(rawW1).candles,
+          d1Candles
+        );
+        const w1Candles = prepareStorylineCandles(mergedW1, { excludeWeekends: false });
+
+        const w1Setup = evaluateWeeklySweepOrRejection(w1Candles);
+        if (w1Setup && d1Candles.length >= 5) {
+          const d1Structure = detectDailyStructure(d1Candles);
+          const d1State = evaluateTfStoryline(d1Candles, {
+            bias: w1Setup.bias,
+            keyLevels: d1Structure?.keyLevels || []
+          });
+
+          const latestBreak = d1State?.latestBreak;
+          const breakMatchesBias =
+            Boolean(latestBreak) &&
+            (!d1Structure?.direction ||
+              d1Structure.direction === "UNCONFIRMED" ||
+              d1Structure.direction === w1Setup.bias);
+
+          if (breakMatchesBias) {
+            const setupKey = `${symbol}:${w1Setup.weekDate}:${w1Setup.bias}:${latestBreak.type}:${latestBreak.datetime}`;
+            if (!deliveredWeeklySetups.has(setupKey)) {
+              deliveredWeeklySetups.add(setupKey);
+              matchedCount += 1;
+
+              const emoji = w1Setup.bias === "BULLISH" ? "🟢" : "🔴";
+              const msg =
+                `${emoji} <b>${triggerLabel} (${matchedCount}/${targetCount}) — ${symbol}</b>\n\n` +
+                `W1: <b>${w1Setup.reason}</b> · ${formatBreakDate12h(w1Setup.weekDate)}\n` +
+                `D1: <b>${latestBreak.type}</b> @ <b>${formatPrice(latestBreak.close)}</b> · ${formatBreakDate12h(latestBreak.datetime)}\n` +
+                `Next: Watch for D1 tap & H4 ${w1Setup.bias} breakout\n\n` +
+                `Sent ${formatWatTimestamp()}\n\n` +
+                `<i>Not an entry signal — bias context only.</i>`;
+
+              for (const chatId of recipients) {
+                await sendMessage(chatId, msg, buildStorylineInlineKeyboard(symbol));
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error(`Market scan failed for ${symbol}:`, err.message);
+      }
+
+      if (matchedCount < targetCount && i < MARKET_SCAN_UNIVERSE.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, paceMs));
+      }
+    }
+  } finally {
+    isMarketScannerRunning = false;
+  }
+}
+
+function maybeRunStartOfWeekScan() {
+  const watNow = getWatNow();
+  const watDay = watNow.getUTCDay(); // 1 = Monday
+  const watHour = watNow.getUTCHours();
+  const weekKey = getMondayUtcDate(watNow.toISOString().slice(0, 10));
+
+  if (watDay === 1 && watHour >= 6 && watHour < 12 && lastWeeklyAutoScanKey !== weekKey) {
+    lastWeeklyAutoScanKey = weekKey;
+    runPacedMarketScan({
+      targetCount: MARKET_SCAN_TARGET_COUNT,
+      paceMs: MARKET_SCAN_PAIR_DELAY_MS,
+      triggerLabel: "NEW WEEK MARKET SCAN"
+    });
+  }
+  }
+      
 function startWatchlistMonitor() {
+  maybeRunStartOfWeekScan();
   setInterval(() => {
+    maybeRunStartOfWeekScan();
     scanWatchlistOnce();
   }, MONITOR_INTERVAL_MS);
 }
