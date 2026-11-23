@@ -2055,29 +2055,89 @@ function buildLiveD1CandlesWithDeveloping(rawD1, completedD1Candles) {
   return [...base, ...extra];
 }
 
-function detectDevelopingD1TapAfterBreak(liveD1Candles, d1State, bias) {
+function detectDevelopingD1TapAfterBreak(liveD1Candles, d1State, bias, tolerancePct = 0.0005) {
   if (!d1State?.latestBreak || !Array.isArray(liveD1Candles) || liveD1Candles.length === 0) {
     return null;
   }
 
-  const breakIdx = Number.isFinite(Number(d1State.latestBreak.index))
-    ? Number(d1State.latestBreak.index)
+  const latestBreak = d1State.latestBreak;
+  const breakIdx = Number.isFinite(Number(latestBreak.index))
+    ? Number(latestBreak.index)
     : -1;
-  const breakTs = d1State.latestBreak.datetime
-    ? toTimestampMs(d1State.latestBreak.datetime, false)
+  const breakTs = latestBreak.datetime
+    ? toTimestampMs(latestBreak.datetime, false)
     : NaN;
-  const breakLevel = Number(d1State.latestBreak.level ?? d1State.latestBreak.price);
+  const breakLevel = Number(latestBreak.level ?? latestBreak.price);
+  const breakCandle = breakIdx >= 0 && breakIdx < liveD1Candles.length
+    ? liveD1Candles[breakIdx]
+    : null;
 
-  const levels = [];
-  if (d1State.latestBreak && Number.isFinite(breakLevel)) {
-    levels.push({
-      label: d1State.latestBreak.type === "IBO" ? "INTERNAL BO" : "EXTERNAL BO",
+  const candidateLevels = [];
+
+  // 1. Most recent breakout level
+  if (Number.isFinite(breakLevel)) {
+    candidateLevels.push({
+      label: latestBreak.type === "IBO" ? "INTERNAL BO" : "EXTERNAL BO",
       low: breakLevel,
       high: breakLevel,
       price: breakLevel,
       formedIndex: breakIdx
     });
   }
+
+  // 2. Open / close levels of the most recent breakout move
+  if (breakCandle) {
+    const bOpen = Number(breakCandle.open);
+    const bClose = Number(breakCandle.close);
+    if (Number.isFinite(bOpen)) {
+      candidateLevels.push({
+        label: "RECENT BO OPEN",
+        low: bOpen,
+        high: bOpen,
+        price: bOpen,
+        formedIndex: breakIdx
+      });
+    }
+    if (Number.isFinite(bClose)) {
+      candidateLevels.push({
+        label: "RECENT BO CLOSE",
+        low: bClose,
+        high: bClose,
+        price: bClose,
+        formedIndex: breakIdx
+      });
+    }
+  }
+
+  // 3. Most recent A-shape / V-shape / open-close key level around the latest breakout
+  const recentKeyLevels = Array.isArray(d1State.keyLevels)
+    ? d1State.keyLevels
+        .filter(kl => {
+          if (!kl) return false;
+          const fIdx = Number(kl.formation_index);
+          if (!Number.isFinite(fIdx)) return false;
+          const biasOk = !bias || bias === "NEUTRAL" || !kl.bias || kl.bias === bias;
+          const nearLatestMove = breakIdx < 0 || fIdx >= Math.max(0, breakIdx - 4);
+          return biasOk && nearLatestMove;
+        })
+        .slice(-2)
+    : [];
+
+  for (const kl of recentKeyLevels) {
+    const kLow = Math.min(Number(kl.low), Number(kl.high));
+    const kHigh = Math.max(Number(kl.low), Number(kl.high));
+    if (Number.isFinite(kLow) && Number.isFinite(kHigh)) {
+      candidateLevels.push({
+        label: kl.type || "RECENT KEY LEVEL",
+        low: kLow,
+        high: kHigh,
+        price: bias === "BEARISH" ? kHigh : kLow,
+        formedIndex: Number(kl.formation_index)
+      });
+    }
+  }
+
+  if (candidateLevels.length === 0) return null;
 
   for (let i = Math.max(0, breakIdx + 1); i < liveD1Candles.length; i++) {
     const c = liveD1Candles[i];
@@ -2088,26 +2148,30 @@ function detectDevelopingD1TapAfterBreak(liveD1Candles, d1State, bias) {
     const low = Number(c.low);
     if (!Number.isFinite(high) || !Number.isFinite(low)) continue;
 
-    for (let k = levels.length - 1; k >= 0; k--) {
-      const kl = levels[k];
-      if (kl.formedIndex < i && low <= kl.high && high >= kl.low) {
-        const priceOk =
-          bias === "BEARISH"
-            ? (!Number.isFinite(breakLevel) || high >= breakLevel)
-            : bias === "BULLISH"
-              ? (!Number.isFinite(breakLevel) || low <= breakLevel)
-              : true;
+    for (let k = candidateLevels.length - 1; k >= 0; k--) {
+      const kl = candidateLevels[k];
+      if (kl.formedIndex >= 0 && kl.formedIndex >= i) continue;
 
-        if (priceOk) {
-          return {
-            label: kl.label,
-            level: kl.price,
-            price: kl.price,
-            datetime: c.datetime || c.date,
-            index: i,
-            isDeveloping: i >= liveD1Candles.length - 1
-          };
-        }
+      const zoneLow = kl.low * (1 - tolerancePct);
+      const zoneHigh = kl.high * (1 + tolerancePct);
+
+      const overlapsZone = high >= zoneLow && low <= zoneHigh;
+      const directionalReachOk =
+        bias === "BULLISH"
+          ? low <= zoneHigh
+          : bias === "BEARISH"
+            ? high >= zoneLow
+            : true;
+
+      if (overlapsZone && directionalReachOk) {
+        return {
+          label: kl.label,
+          level: kl.price,
+          price: kl.price,
+          datetime: c.datetime || c.date,
+          index: i,
+          isDeveloping: i >= liveD1Candles.length - 1
+        };
       }
     }
   }
