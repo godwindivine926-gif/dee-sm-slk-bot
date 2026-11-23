@@ -1787,6 +1787,47 @@ function evaluateTfStoryline(candles, opts = {}) {
     }
   }
 
+    if (!ibo && (bias === "BULLISH" || bias === "BEARISH") && candles.length >= 3) {
+    const swings = identifySwings(candles);
+    const requiredSwingType = bias === "BEARISH" ? "SWING_LOW" : "SWING_HIGH";
+    const minIndex = ebo ? ebo.index + 1 : 1;
+
+    const candidateSwings = swings.filter(
+      sw => sw.type === requiredSwingType && sw.index < candles.length - 1
+    );
+
+    for (let p = candidateSwings.length - 1; p >= 0; p--) {
+      const sw = candidateSwings[p];
+      const startIdx = Math.max(minIndex, sw.index + 1);
+      let matchedIbo = null;
+
+      for (let i = startIdx; i < candles.length; i++) {
+        const close = Number(candles[i].close);
+        if (Number.isNaN(close)) continue;
+
+        const broke =
+          (bias === "BULLISH" && close > sw.level) ||
+          (bias === "BEARISH" && close < sw.level);
+
+        if (broke) {
+          matchedIbo = {
+            type: "IBO",
+            level: sw.level,
+            close,
+            datetime: candles[i].datetime || candles[i].date,
+            index: i
+          };
+          break;
+        }
+      }
+
+      if (matchedIbo) {
+        ibo = matchedIbo;
+        break;
+      }
+    }
+    }
+  
   const latestBreak =
     ebo && ibo ? (ibo.index >= ebo.index ? ibo : ebo) : ibo || ebo || null;
 
@@ -2074,48 +2115,7 @@ async function buildStorylineReport(rawSymbol) {
     preTapSwing: d1PreTapSwing,
     pullbackSwing: d1PullbackSwing,
     keyLevels: d1Structure?.keyLevels || []
-  });
-    if (!ibo && (bias === "BULLISH" || bias === "BEARISH") && candles.length >= 3) {
-    const swings = identifySwings(candles);
-    const requiredSwingType = bias === "BEARISH" ? "SWING_LOW" : "SWING_HIGH";
-    const minIndex = ebo ? ebo.index + 1 : 1;
-
-    const candidateSwings = swings.filter(
-      sw => sw.type === requiredSwingType && sw.index < candles.length - 1
-    );
-
-    for (let p = candidateSwings.length - 1; p >= 0; p--) {
-      const sw = candidateSwings[p];
-      const startIdx = Math.max(minIndex, sw.index + 1);
-      let matchedIbo = null;
-
-      for (let i = startIdx; i < candles.length; i++) {
-        const close = Number(candles[i].close);
-        if (Number.isNaN(close)) continue;
-
-        const broke =
-          (bias === "BULLISH" && close > sw.level) ||
-          (bias === "BEARISH" && close < sw.level);
-
-        if (broke) {
-          matchedIbo = {
-            type: "IBO",
-            level: sw.level,
-            close,
-            datetime: candles[i].datetime || candles[i].date,
-            index: i
-          };
-          break;
-        }
-      }
-
-      if (matchedIbo) {
-        ibo = matchedIbo;
-        break;
-      }
-    }
-    }
-  
+  });   
   const breakTs = d1State?.latestBreak?.datetime
     ? toTimestampMs(d1State.latestBreak.datetime, false)
     : null;
