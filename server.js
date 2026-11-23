@@ -3998,13 +3998,14 @@ function evaluateH4BreakoutConfirmation(h4Candles, dailySummarySetup) {
     dailySummarySetup.tapTime ??
     null;
 
-  return evaluateH4BreakoutInDirection(
+    return evaluateH4BreakoutInDirection(
     closedCandles,
     dailySummarySetup.bias,
     dailySummarySetup.prevDayDate,
     developingTapTime
   );
-  
+}
+
 async function runWatchlistDailySummaryAndH4Monitor(chatIds = null) {
   const rows = await databaseRequest("watchlist?is_active=eq.true&select=symbol,chat_id");
     if (!Array.isArray(rows) || rows.length === 0) return;
