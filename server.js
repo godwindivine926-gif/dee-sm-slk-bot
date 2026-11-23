@@ -4096,13 +4096,13 @@ async function runWatchlistDailySummaryAndH4Monitor(chatIds = null) {
             d1CountAtSummary: d1Candles.length
           });
 
-                    const emoji = dailySummary.bias === "BULLISH" ? "🟢" : "🔴";
-          const summaryMsg =
-            `${emoji} <b>DAILY SUMMARY — ${escapeHtml(symbol)}</b>\n\n` +
-            `Bias: <b>${escapeHtml(dailySummary.bias)}</b> (Weekly target still active)\n` +
-            `D1: <b>${escapeHtml(dailySummary.reason)}</b>\n` +
-            `Next: Checking for <b>H4 ${escapeHtml(dailySummary.bias)} breakout</b> (from prev close or developing D1 candle)\n\n` +
-            `Sent ${formatWatTimestamp()}`;
+                           const emoji = dailySummary.bias === "BULLISH" ? "🟢" : "🔴";
+       const summaryMsg =
+         `${emoji} <b>DAILY SUMMARY — ${escapeHtml(symbol)}</b>\n\n` +
+         `Bias: <b>${escapeHtml(dailySummary.bias)}</b> (Weekly target still active)\n` +
+         `D1: <b>${escapeHtml(dailySummary.reason)}</b>\n` +
+         `Next: Checking for <b>H4 ${escapeHtml(dailySummary.bias)} breakout</b> (from prev close or developing D1 candle)\n\n` +
+         `Sent ${formatWatTimestamp()}`;
           
           for (const chatId of recipients) {
             await sendMessage(chatId, summaryMsg, buildStorylineInlineKeyboard(symbol));
@@ -4166,16 +4166,21 @@ function maybeRunStartOfWeekScan() {
 
 function startWatchlistMonitor() {
   maybeRunStartOfWeekScan();
-  runWatchlistDailySummaryAndH4Monitor().catch(err =>
-    console.error("Watchlist daily summary / H4 monitor startup error:", err.message)
-  );
+
+  setTimeout(() => {
+    runWatchlistDailySummaryAndH4Monitor().catch(err =>
+      console.error("Watchlist daily summary / H4 monitor startup error:", err.message)
+    );
+  }, 15000);
 
   setInterval(() => {
     maybeRunStartOfWeekScan();
     scanWatchlistOnce();
-    runWatchlistDailySummaryAndH4Monitor().catch(err =>
-      console.error("Watchlist daily summary / H4 monitor interval error:", err.message)
-    );
+    setTimeout(() => {
+      runWatchlistDailySummaryAndH4Monitor().catch(err =>
+        console.error("Watchlist daily summary / H4 monitor interval error:", err.message)
+      );
+    }, 45000);
   }, MONITOR_INTERVAL_MS);
 }
 
