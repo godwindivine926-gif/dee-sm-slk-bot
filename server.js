@@ -2495,14 +2495,28 @@ const isAtOrAfterTap = evDate => {
   }
 
   let h4Confirmed = null;
-  if (
-    d1State.hasBreak &&
-    activeRetestTap &&
-    Array.isArray(h4Candles) &&
-    Number.isFinite(effectiveTapTs)
-  ) {
-    h4Confirmed = findH4BreakAfterTap(h4Candles, d1Bias, effectiveTapTs);
-  }
+if (d1State.hasBreak && activeRetestTap && Array.isArray(h4Candles)) {
+  const afterTapBreak = Number.isFinite(effectiveTapTs)
+    ? findH4BreakAfterTap(h4Candles, d1Bias, effectiveTapTs)
+    : null;
+
+  const fallbackH4Break =
+    !afterTapBreak && typeof evaluateH4BreakoutInDirection === "function"
+      ? evaluateH4BreakoutInDirection(h4Candles, d1Bias, null)
+      : null;
+
+  h4Confirmed =
+    afterTapBreak ||
+    (fallbackH4Break
+      ? {
+          type: "H4 BO",
+          price: fallbackH4Break.close,
+          datetime: fallbackH4Break.datetime,
+          label: fallbackH4Break.summary
+        }
+      : null);
+}
+  
     console.log("NZD/CAD H4 debug:", {
     d1Bias,
     effectiveTapTs,
