@@ -2732,22 +2732,22 @@ let argument = parts[1];
       return;
             }
     
-        if (command === "/help") {
-      await sendMessage(
-        chatId,
-        `<b>BOT COMMANDS</b>\n\n` +
-          `/add GBPUSD - Add pair\n` +
-          `/remove GBPUSD - Remove pair\n` +
-          `/watchlist - View pairs\n` +
-          `/check GBPUSD - Check W1/D1/H4 & EBOs\n` +
-          `/pause - Pause monitoring\n` +
-          `/resume - Resume monitoring\n` +
-          `/weekly - Previous week's events` +
-      `/scan - Scan pairs for W1 + D1 setups\n` +
-      );
-      return;
-        }
-
+    if (command === "/help") {
+  await sendMessage(
+    chatId,
+    `<b>BOT COMMANDS</b>\n\n` +
+      `/add GBPUSD - Add pair\n` +
+      `/remove GBPUSD - Remove pair\n` +
+      `/watchlist - View pairs\n` +
+      `/check GBPUSD - Check W1/D1/H4 & EBOs\n` +
+      `/pause - Pause monitoring\n` +
+      `/resume - Resume monitoring\n` +
+      `/weekly - Previous week's events\n` +
+      `/scan - Scan pairs for W1 + D1 setups`
+  );
+  return;
+    }
+    
     if (command === "/status") {
   const uptimeMins = Math.floor(process.uptime() / 60);
   await sendMessage(
