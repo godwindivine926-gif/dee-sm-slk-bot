@@ -3482,11 +3482,25 @@ const rawH4 = await getMarketCandles(symbol, "4h", 150);
 }
 
 const BASE_MARKET_UNIVERSE = [
-  "EUR/USD", "EUR/GBP", "BTC/USD", "GBP/JPY", "AUD/NZD", "XAU/USD",
-  "USD/JPY", "EUR/AUD", "CAD/CHF", "GBP/USD", "NZD/JPY", "EUR/CHF",
-  "AUD/USD", "GBP/CAD", "CHF/JPY", "USD/CAD", "EUR/NZD", "AUD/CAD",
-  "GBP/AUD", "NZD/USD", "EUR/CAD", "GBP/NZD", "AUD/JPY", "USD/CHF",
-  "EUR/JPY", "GBP/CHF", "NZD/CAD", "AUD/CHF", "CAD/JPY", "NZD/CHF"
+  // Crypto (2)
+  "BTC/USD", "ETH/USD",
+
+  // Metals (2)
+  "XAU/USD", "XAG/USD",
+
+  // Indices (4)
+  "NDX", "DJI", "DAX", "N225",
+
+  // Forex Majors (7)
+  "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD", "NZD/USD",
+
+  // Forex Minors / Crosses (21)
+  "EUR/GBP", "EUR/JPY", "EUR/CHF", "EUR/AUD", "EUR/CAD", "EUR/NZD",
+  "GBP/JPY", "GBP/CHF", "GBP/AUD", "GBP/CAD", "GBP/NZD",
+  "AUD/JPY", "AUD/CHF", "AUD/CAD", "AUD/NZD",
+  "NZD/JPY", "NZD/CHF", "NZD/CAD",
+  "CAD/JPY", "CAD/CHF",
+  "CHF/JPY"
 ];
 
 function shuffleMarketUniverse(list) {
