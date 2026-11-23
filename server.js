@@ -3212,9 +3212,45 @@ const rawH4 = await getMarketCandles(symbol, "4h", 150);
         const todayWatDate = getWatNow().toISOString().slice(0, 10);
         const nextDayRule =
           latestD1Date && latestD1Date < todayWatDate ? "✅" : "⏳";
+        const activeBias = d1Bias || w1Bias || null;
+        const d1StateForMonitor =
+          d1Candles.length >= 5 && activeBias
+            ? evaluateTfStoryline(d1Candles, {
+                bias: activeBias,
+                keyLevels: d1Structure?.keyLevels || []
+              })
+            : null;
 
-        marketCache.set(symbol, { w1ToD1, d1ToH4, w1Bias, d1Bias, nextDayRule });
-      } catch (err) {
+        const d1BreakForMonitor = d1StateForMonitor?.latestBreak || null;
+        const liveD1Candles = buildLiveD1CandlesWithDeveloping(rawD1, d1Candles);
+        const activeTapForMonitor = d1BreakForMonitor
+          ? d1StateForMonitor?.retestTap ||
+            detectDevelopingD1TapAfterBreak(liveD1Candles, d1StateForMonitor, activeBias)
+          : null;
+
+        const activeTapTs = activeTapForMonitor?.datetime
+          ? toTimestampMs(activeTapForMonitor.datetime, false)
+          : null;
+
+        const liveTapH4Break =
+          d1BreakForMonitor &&
+          activeTapForMonitor &&
+          activeBias &&
+          Number.isFinite(activeTapTs)
+            ? findH4BreakAfterTap(h4Candles, activeBias, activeTapTs)
+            : null;
+        
+                   marketCache.set(symbol, {
+          w1ToD1,
+          d1ToH4,
+          w1Bias,
+          d1Bias,
+          nextDayRule,
+          activeBias,
+          d1Break: d1BreakForMonitor,
+          activeTap: activeTapForMonitor,
+          liveTapH4Break
+        });
         console.error(`Monitor fetch error for ${symbol}:`, err.message);
       }
 
@@ -3271,7 +3307,27 @@ const rawH4 = await getMarketCandles(symbol, "4h", 150);
         }
       }
     }
-
+      if (data.liveTapH4Break && data.d1Break && data.activeTap && data.activeBias) {
+        const liveKey = `${chatId}:${symbol}:LIVE_D1_TAP_H4_BO:${data.d1Break.datetime}:${data.activeTap.datetime}:${data.liveTapH4Break.datetime}`;
+        if (!sentAlertKeys.has(liveKey)) {
+          sentAlertKeys.add(liveKey);
+          if (!isInitialSeedRun) {
+            const badge = data.activeBias === "BULLISH" ? "🟢" : "🔴";
+            await sendMessage(
+              chatId,
+              `<b>${badge} ${data.activeBias} H4 BREAKOUT AFTER D1 TAP — ${symbol}</b>\n` +
+                `<b>${data.liveTapH4Break.kind === "INTERNAL_BO" ? "INTERNAL BREAKOUT" : "EXTERNAL BREAKOUT"}</b>\n\n` +
+                `D1 ${data.d1Break.type} @ <b>${formatPrice(data.d1Break.close)}</b> · ${formatBreakDate12h(data.d1Break.datetime)}\n` +
+                `D1 tap (${data.activeTap.label}) @ <b>${formatPrice(data.activeTap.price)}</b> · ${formatBreakDate12h(data.activeTap.datetime)}${data.activeTap.isDeveloping ? " <i>(developing D1)</i>" : ""}\n` +
+                `<b>${data.liveTapH4Break.type}</b> @ <b>${formatPrice(data.liveTapH4Break.price)}</b> · ${formatBreakDate12h(data.liveTapH4Break.datetime)}\n\n` +
+                `Sent ${formatWatTimestamp()}\n\n` +
+                `<i>Not an entry signal — bias context only.</i>`,
+              buildStorylineInlineKeyboard(symbol)
+            );
+          }
+        }
+      }
+    
     hasCompletedInitialSeed = true;
   } catch (err) {
     console.error("Watchlist scan error:", err.response?.data || err.message);
