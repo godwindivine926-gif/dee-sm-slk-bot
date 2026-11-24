@@ -171,29 +171,52 @@ async function databaseRequest(path, method = "GET", body = null) {
   return response.data;
 }
 
-async function getMarketCandles(symbol, interval, outputsize = 150) {
+async function getMarketCandles(symbol, interval, outputsize = 150, retries = 2) {
   if (!TWELVE_DATA_API_KEY) {
     throw new Error("TWELVE_DATA_API_KEY is missing.");
   }
 
-  const response = await axios.get(
-    "https://api.twelvedata.com/time_series",
-    {
-      params: {
-        symbol: normalizeSymbol(symbol),
-        interval,
-        outputsize,
-        apikey: TWELVE_DATA_API_KEY
-      },
-      timeout: 15000
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await axios.get(
+        "https://api.twelvedata.com/time_series",
+        {
+          params: {
+            symbol: normalizeSymbol(symbol),
+            interval,
+            outputsize,
+            apikey: TWELVE_DATA_API_KEY
+          },
+          timeout: 15000
+        }
+      );
+
+      if (response.data.status === "error" || !Array.isArray(response.data.values)) {
+        const msg = response.data.message || "Market data unavailable.";
+        if (String(msg).includes("429") || String(msg).toLowerCase().includes("run out of api credits")) {
+          if (attempt < retries) {
+            await new Promise(resolve => setTimeout(resolve, 65000));
+            continue;
+          }
+        }
+        throw new Error(msg);
+      }
+
+      return response.data.values;
+    } catch (error) {
+      const status = error.response?.status;
+      const isRateLimit =
+        status === 429 ||
+        String(error.message || "").includes("429") ||
+        String(error.message || "").toLowerCase().includes("rate limit");
+
+      if (isRateLimit && attempt < retries) {
+        await new Promise(resolve => setTimeout(resolve, 65000));
+        continue;
+      }
+      throw error;
     }
-  );
-
-  if (response.data.status === "error" || !Array.isArray(response.data.values)) {
-    throw new Error(response.data.message || "Market data unavailable.");
   }
-
-  return response.data.values;
 }
 
 function isValidOhlcCandle(candle) {
