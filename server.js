@@ -1770,10 +1770,20 @@ function formatBreakDate12h(rawDate) {
     return str;
   }
 
-  const parsedMs = toTimestampMs(str, false);
+  // Parse Twelve Data timestamps ("YYYY-MM-DD HH:mm:ss" or ISO) explicitly as UTC
+  const normalizedIso = str.includes("T")
+    ? (str.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(str) ? str : `${str}Z`)
+    : `${str.replace(" ", "T")}Z`;
+
+  const parsedMs = Date.parse(normalizedIso);
   if (!Number.isFinite(parsedMs)) return str;
 
-  const watDate = new Date(parsedMs + WAT_OFFSET_MS);
+  // Convert UTC to WAT (UTC+1 / Africa/Lagos)
+  const watOffsetMs = typeof WAT_OFFSET_MS === "number" && Number.isFinite(WAT_OFFSET_MS)
+    ? WAT_OFFSET_MS
+    : 60 * 60 * 1000;
+
+  const watDate = new Date(parsedMs + watOffsetMs);
   const datePart = watDate.toISOString().slice(0, 10);
   let hour = watDate.getUTCHours();
   const minutePart = String(watDate.getUTCMinutes()).padStart(2, "0");
