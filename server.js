@@ -4176,10 +4176,10 @@ async function runWatchlistDailySummaryAndH4Monitor(chatIds = null) {
           } catch (error) {
         console.error(`Watchlist daily summary / H4 monitor failed for ${symbol}:`, error.message);
       }
-
-    await sleep(10000);
+ await sleep(10000);
   }
-  
+}
+ 
 function maybeRunStartOfWeekScan() {
   const wat = getWatParts();
   if (!wat) return;
