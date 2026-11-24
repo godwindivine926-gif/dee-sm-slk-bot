@@ -59,6 +59,11 @@ function parseChatId(chatId) {
   }
   return numeric;
 }
+function getWatNow(referenceDate = new Date()) {
+  const base = referenceDate instanceof Date ? referenceDate : new Date(referenceDate);
+  if (Number.isNaN(base.getTime())) return new Date(NaN);
+  return new Date(base.getTime() + 60 * 60 * 1000);
+}
 
 function getWatParts(referenceDate = new Date()) {
   const base = referenceDate instanceof Date ? referenceDate : new Date(referenceDate);
