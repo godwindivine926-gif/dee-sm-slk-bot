@@ -3914,19 +3914,19 @@ function evaluateH4BreakoutInDirection(
   const minMs = minTimestamp ? Date.parse(String(minTimestamp)) : NaN;
   const swings = typeof identifySwings === "function" ? identifySwings(h4Candles) : [];
 
-  for (let idx = h4Candles.length - 1; idx >= 2; idx--) {
-    const candle = h4Candles[idx];
-    const close = Number(candle.close);
-    if (!Number.isFinite(close)) continue;
+  for (let idx = 2; idx < h4Candles.length; idx++) {
+  const candle = h4Candles[idx];
+  const close = Number(candle.close);
+  if (!Number.isFinite(close)) continue;
 
-    if (candle.datetime) {
-      const cMs = Date.parse(String(candle.datetime));
-      if (Number.isFinite(sinceMs) && Number.isFinite(cMs) && cMs < sinceMs) break;
-      // Skip H4 candles at or before a developing D1 tap timestamp
-      if (Number.isFinite(minMs) && Number.isFinite(cMs) && cMs <= minMs) continue;
-    }
+  if (candle.datetime) {
+    const cMs = Date.parse(String(candle.datetime));
+    if (Number.isFinite(sinceMs) && Number.isFinite(cMs) && cMs < sinceMs) continue;
+    // Skip H4 candles at or before a developing D1 tap timestamp
+    if (Number.isFinite(minMs) && Number.isFinite(cMs) && cMs <= minMs) continue;
+  }
     
-    if (bias === "BULLISH") {
+      if (bias === "BULLISH") {
       const priorHighs = swings
         .filter(s => s.type === "SWING_HIGH" && s.index < idx)
         .map(s => Number(s.level))
