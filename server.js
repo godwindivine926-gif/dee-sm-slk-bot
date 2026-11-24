@@ -2354,9 +2354,9 @@ async function buildStorylineReport(rawSymbol) {
   const symbol = normalizeSymbol(rawSymbol || "GBPUSD");
   
   const rawW1 = await getMarketCandles(symbol, "1week", 100);
-  await new Promise(resolve => setTimeout(resolve, 8500));
+  await new Promise(resolve => setTimeout(resolve, 11000));
   const rawD1 = await getMarketCandles(symbol, "1day", 150);
-  await new Promise(resolve => setTimeout(resolve, 8500));
+  await new Promise(resolve => setTimeout(resolve, 11000));
   const rawH4 = await getMarketCandles(symbol, "4h", 150);
 
     const d1Candles = filterCompletedDailyCandles(rawD1).candles;
@@ -2385,11 +2385,11 @@ async function buildStorylineReport(rawSymbol) {
     ? h4Structure.direction
     : d1Bias;
 
-    const activeBias = d1Bias || w1Bias;
-  const latestPrice = h4Candles?.[h4Candles.length - 1]?.close
-    ?? d1Candles?.[d1Candles.length - 1]?.close
-    ?? latestW1?.close;
-
+    const latestW1 = w1Candles?.[w1Candles.length - 1];
+const latestPrice = h4Candles?.[h4Candles.length - 1]?.close
+  ?? d1Candles?.[d1Candles.length - 1]?.close
+  ?? latestW1?.close;
+  
   const weeklyTarget = computeWeeklyTarget(w1Candles, activeBias, latestPrice);
   const dailyTarget = computeDailyIntradayTarget(d1Candles, activeBias, latestPrice);
 
