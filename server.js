@@ -3206,9 +3206,9 @@ let isMonitorRunning = false;
 let hasCompletedInitialSeed = false;
 
 function isWeekdayInWat(referenceDate = new Date()) {
-  const watNow = getWatNow(referenceDate);
-  const day = watNow.getUTCDay();
-  return day !== 0 && day !== 6;
+  const wat = getWatParts(referenceDate);
+  if (!wat) return true;
+  return wat.weekday !== "Sun" && wat.weekday !== "Sat";
 }
 
 function formatWatTimestamp(referenceDate = new Date()) {
