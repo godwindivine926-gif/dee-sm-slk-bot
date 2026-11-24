@@ -4048,6 +4048,7 @@ async function runWatchlistDailySummaryAndH4Monitor(chatIds = null) {
   const rows = await databaseRequest("watchlist?is_active=eq.true&select=symbol,chat_id");
     if (!Array.isArray(rows) || rows.length === 0) return;
 
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const groupedBySymbol = new Map();
   for (const row of rows) {
     const symbol = normalizeSymbol(row.symbol);
@@ -4172,12 +4173,13 @@ async function runWatchlistDailySummaryAndH4Monitor(chatIds = null) {
           }
         }
       }
-    } catch (err) {
-      console.error(`Watchlist daily summary / H4 monitor failed for ${symbol}:`, err.message);
-    }
+          } catch (error) {
+        console.error(`Watchlist daily summary / H4 monitor failed for ${symbol}:`, error.message);
+      }
+
+    await sleep(10000);
   }
-        }
-                                       
+  
 function maybeRunStartOfWeekScan() {
   const wat = getWatParts();
   if (!wat) return;
