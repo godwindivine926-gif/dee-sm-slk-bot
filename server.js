@@ -4215,8 +4215,7 @@ function startWatchlistMonitor() {
     }, 45000);
   }, MONITOR_INTERVAL_MS);
 }
-
-
+  
 // =====================================
 // SERVER START
 // =====================================
