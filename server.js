@@ -3231,18 +3231,6 @@ function formatWatTimestamp(referenceDate = new Date()) {
   return `${wat.year}-${wat.month}-${wat.day} ${hours12}:${wat.minutes} ${period} WAT`;
 }
 
-const year = watNow.getUTCFullYear();
-  const month = String(watNow.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(watNow.getUTCDate()).padStart(2, "0");
-
-  const hours24 = watNow.getUTCHours();
-  const minutes = String(watNow.getUTCMinutes()).padStart(2, "0");
-  const period = hours24 >= 12 ? "PM" : "AM";
-  const hours12 = String(hours24 % 12 || 12).padStart(2, "0");
-
-  return `${year}-${month}-${day} ${hours12}:${minutes} ${period} WAT`;
-}
-
 function buildCascadeAlertMessage(symbol, cascadeLabel, setup, context = {}) {
   const isBullish = setup.ebo.type.startsWith("BULLISH");
   const badge = isBullish ? "🟢" : "🔴";
