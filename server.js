@@ -4201,7 +4201,7 @@ function startWatchlistMonitor() {
 
   setTimeout(() => {
     runWatchlistDailySummaryAndH4Monitor().catch(err =>
-      console.error("Watchlist daily summary / H4 monitor startup error:", err.message)
+      console.error("Watchlist daily summary / H4 monitor interval error:", err.message);                                      
     );
   }, 15000);
 
@@ -4210,7 +4210,7 @@ function startWatchlistMonitor() {
     scanWatchlistOnce();
     setTimeout(() => {
       runWatchlistDailySummaryAndH4Monitor().catch(err =>
-        console.error("Watchlist daily summary / H4 monitor interval error:", err.message)
+        console.error("Watchlist daily summary / H4 monitor interval error:", err.message);                                           
       );
     }, 45000);
   }, MONITOR_INTERVAL_MS);
