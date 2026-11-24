@@ -3547,7 +3547,7 @@ function evaluateLastWeekCloseSetup(w1Candles, d1KeyLevels = []) {
   if (lastHigh > prevHigh && lastClose < prevHigh) {
     return {
       bias: "BEARISH",
-      reason: `Last W1 Close Below Prior High (${formatPrice(lastClose)} < ${formatPrice(prevHigh)})`,
+      reason: `Last W1 sweept previous weekly higf close below (${formatPrice(lastClose)} < ${formatPrice(prevHigh)})`,
       weekDate: lastWeek.datetime,
       lastWeek
     };
@@ -3557,7 +3557,7 @@ function evaluateLastWeekCloseSetup(w1Candles, d1KeyLevels = []) {
   if (lastLow < prevLow && lastClose > prevLow) {
     return {
       bias: "BULLISH",
-      reason: `Last W1 Close Above Prior Low (${formatPrice(lastClose)} > ${formatPrice(prevLow)})`,
+      reason: `Last W1 swept previous weekly Low and close above (${formatPrice(lastClose)} > ${formatPrice(prevLow)})`,
       weekDate: lastWeek.datetime,
       lastWeek
     };
@@ -3587,7 +3587,7 @@ function evaluateLastWeekCloseSetup(w1Candles, d1KeyLevels = []) {
 
     return {
       bias: inferredBias,
-      reason: `Last W1 Close @ Key Level (${formatPrice(lastClose)})`,
+      reason: `Last Week Reacted @key level (${formatPrice(lastClose)})`,
       weekDate: lastWeek.datetime,
       lastWeek
     };
