@@ -60,8 +60,31 @@ function parseChatId(chatId) {
   return numeric;
 }
 
-function getWatNow(referenceDate = new Date()) {
-  return new Date(referenceDate.getTime() + WAT_OFFSET_MS);
+function getWatParts(referenceDate = new Date()) {
+  const base = referenceDate instanceof Date ? referenceDate : new Date(referenceDate);
+  if (Number.isNaN(base.getTime())) return null;
+
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Africa/Lagos",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  }).formatToParts(base);
+
+  const map = Object.fromEntries(parts.map(p => [p.type, p.value]));
+  return {
+    year: map.year,
+    month: map.month,
+    day: map.day,
+    weekday: map.weekday, // "Sun", "Mon", ...
+    hours24: Number(map.hour === "24" ? 0 : map.hour),
+    minutes: map.minute
+  };
 }
 
 async function sendMessage(chatId, text, replyMarkup = null) {
@@ -3189,12 +3212,16 @@ function isWeekdayInWat(referenceDate = new Date()) {
 }
 
 function formatWatTimestamp(referenceDate = new Date()) {
-  const watNow = getWatNow(referenceDate);
-  if (!(watNow instanceof Date) || Number.isNaN(watNow.getTime())) {
-    return String(referenceDate || "");
-  }
+  const wat = getWatParts(referenceDate);
+  if (!wat) return String(referenceDate || "");
 
-  const year = watNow.getUTCFullYear();
+  const period = wat.hours24 >= 12 ? "PM" : "AM";
+  const hours12 = String(wat.hours24 % 12 || 12).padStart(2, "0");
+
+  return `${wat.year}-${wat.month}-${wat.day} ${hours12}:${wat.minutes} ${period} WAT`;
+}
+
+const year = watNow.getUTCFullYear();
   const month = String(watNow.getUTCMonth() + 1).padStart(2, "0");
   const day = String(watNow.getUTCDate()).padStart(2, "0");
 
