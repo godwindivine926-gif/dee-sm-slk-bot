@@ -2394,7 +2394,8 @@ async function buildStorylineReport(rawSymbol) {
     ? h4Structure.direction
     : d1Bias;
 
-    const latestW1 = w1Candles?.[w1Candles.length - 1];
+    const activeBias = d1Bias || w1Bias;
+const latestW1 = w1Candles?.[w1Candles.length - 1];
 const latestPrice = h4Candles?.[h4Candles.length - 1]?.close
   ?? d1Candles?.[d1Candles.length - 1]?.close
   ?? latestW1?.close;
