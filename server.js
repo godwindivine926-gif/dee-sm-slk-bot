@@ -3984,23 +3984,36 @@ function evaluateH4BreakoutInDirection(
   if (!Array.isArray(h4Candles) || h4Candles.length < 3) return null;
   if (bias !== "BULLISH" && bias !== "BEARISH") return null;
 
-  const sinceMs = sinceTimestamp ? Date.parse(String(sinceTimestamp)) : NaN;
-  const minMs = minTimestamp ? Date.parse(String(minTimestamp)) : NaN;
+    const parseBoundMs = (val) => {
+    if (val === null || val === undefined || val === "") return NaN;
+    if (typeof val === "number") {
+      if (!Number.isFinite(val)) return NaN;
+      return val < 1e12 ? val * 1000 : val;
+    }
+    if (typeof toTimestampMs === "function") {
+      return toTimestampMs(val, false);
+    }
+    const parsed = Date.parse(String(val));
+    return Number.isFinite(parsed) ? parsed : NaN;
+  };
+
+  const sinceMs = parseBoundMs(sinceTimestamp);
+  const minMs = parseBoundMs(minTimestamp);
   const swings = typeof identifySwings === "function" ? identifySwings(h4Candles) : [];
 
   for (let idx = 2; idx < h4Candles.length; idx++) {
-  const candle = h4Candles[idx];
-  const close = Number(candle.close);
-  if (!Number.isFinite(close)) continue;
+    const candle = h4Candles[idx];
+    const close = Number(candle.close);
+    if (!Number.isFinite(close)) continue;
 
-  if (candle.datetime) {
-    const cMs = Date.parse(String(candle.datetime));
-    if (Number.isFinite(sinceMs) && Number.isFinite(cMs) && cMs < sinceMs) continue;
-    // Skip H4 candles at or before a developing D1 tap timestamp
-    if (Number.isFinite(minMs) && Number.isFinite(cMs) && cMs <= minMs) continue;
-  }
+    if (candle.datetime) {
+      const cMs = parseBoundMs(candle.datetime);
+      if (Number.isFinite(sinceMs) && Number.isFinite(cMs) && cMs < sinceMs) continue;
+      // Skip H4 candles at or before a developing D1 tap timestamp
+      if (Number.isFinite(minMs) && Number.isFinite(cMs) && cMs <= minMs) continue;
+    }
     
-      if (bias === "BULLISH") {
+    if (bias === "BULLISH") {
       const priorHighs = swings
         .filter(s => s.type === "SWING_HIGH" && s.index < idx)
         .map(s => Number(s.level))
