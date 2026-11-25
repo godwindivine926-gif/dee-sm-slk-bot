@@ -2584,14 +2584,18 @@ if (d1State.hasBreak && activeRetestTap && Array.isArray(h4Candles) && Number.is
     fallbackH4Break?.datetime || fallbackH4Break?.time || fallbackH4Break?.timestamp;
   const fallbackTs = rawFallbackTime ? new Date(rawFallbackTime).getTime() : NaN;
   
+    const tapMs =
+    typeof effectiveTapTs === "number" && effectiveTapTs < 1e12
+      ? effectiveTapTs * 1000
+      : Number(effectiveTapTs);
+
   const validFallbackBreak =
     fallbackH4Break &&
     Number.isFinite(fallbackTs) &&
-    Number.isFinite(effectiveTapTs) &&
-    const tapMs =
-  typeof effectiveTapTs === "number" && effectiveTapTs < 1e12
-    ? effectiveTapTs * 1000
-    : Number(effectiveTapTs);
+    Number.isFinite(tapMs) &&
+    fallbackTs >= tapMs
+      ? fallbackH4Break
+      : null;
   
   h4Confirmed =
     afterTapBreak ||
