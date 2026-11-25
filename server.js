@@ -2575,23 +2575,34 @@ const isAtOrAfterTap = evDate => {
 if (d1State.hasBreak && activeRetestTap && Array.isArray(h4Candles) && Number.isFinite(effectiveTapTs)) {
   const afterTapBreak = findH4BreakAfterTap(h4Candles, d1Bias, effectiveTapTs);
 
-  const fallbackH4Break =
+    const fallbackH4Break =
     !afterTapBreak && typeof evaluateH4BreakoutInDirection === "function"
       ? evaluateH4BreakoutInDirection(h4Candles, d1Bias, effectiveTapTs)
       : null;
 
+  const fallbackTs = fallbackH4Break
+    ? parseCandleTimestamp(fallbackH4Break.datetime || fallbackH4Break.time || fallbackH4Break.timestamp)
+    : NaN;
+
+  const validFallbackBreak =
+    fallbackH4Break &&
+    Number.isFinite(fallbackTs) &&
+    Number.isFinite(effectiveTapTs) &&
+    fallbackTs >= effectiveTapTs
+      ? fallbackH4Break
+      : null;
+
   h4Confirmed =
     afterTapBreak ||
-    (fallbackH4Break
+    (validFallbackBreak
       ? {
           type: "H4 BO",
-          price: fallbackH4Break.close,
-          datetime: fallbackH4Break.datetime,
-          label: fallbackH4Break.summary
+          price: validFallbackBreak.close,
+          datetime: validFallbackBreak.datetime || validFallbackBreak.time || validFallbackBreak.timestamp,
+          label: validFallbackBreak.summary
         }
       : null);
 }
-  
   const storylineEmoji = d1Bias === "BULLISH" ? "🟢" : d1Bias === "BEARISH" ? "🔴" : "⚪";
   const storylineDir = d1Bias === "BULLISH" ? "BULLISH" : d1Bias === "BEARISH" ? "BEARISH" : "NEUTRAL";
 
@@ -2600,10 +2611,8 @@ if (d1State.hasBreak && activeRetestTap && Array.isArray(h4Candles) && Number.is
     : `D1 break: <i>None confirmed yet</i>`;
 
     const d1TapLine = activeRetestTap
-    ? `D1 tap (${activeRetestTap.label}) @ <b>${formatPrice(activeRetestTap.price)}</b> · ${formatBreakDate12h(activeRetestTap.datetime)}${activeRetestTap.isDeveloping ? " <i>(developing D1)</i>" : ""}`
-    : d1State.latestBreak
-    ? `D1 tap: <i>Waiting for tap into D1 key level (open/close, external BO, or internal BO)</i>`
-    : `D1 tap: <i>Pending D1 break</i>`;
+  ? `D1 tap (${activeRetestTap.label}) @ <b>${formatPrice(activeRetestTap.price ?? activeRetestTap.level)}</b>`
+  : null;
   
     const h4BreakLine =
     d1State.hasBreak && activeRetestTap
@@ -2616,19 +2625,27 @@ if (d1State.hasBreak && activeRetestTap && Array.isArray(h4Candles) && Number.is
     ? `<b>Status: H4 breakout confirmed — look for entries</b>`
     : `<b>Status: Waiting on full W1 > D1 > H4 sequence</b>`;
 
-  const fullMessage =
-    `${storylineEmoji} <b>${storylineDir} STORYLINE —</b>\n` +
-    `<b>${symbol} · W1 > D1 > H4</b>\n\n` +
-    `${w1Summary}\n` +
-    `${d1BreakLine}\n` +
-    `${d1TapLine}\n` +
-    `${h4BreakLine}\n\n` +
-        `${sequenceStatus}\n\n` +
-      `${weeklyTargetLine}\n` +
-      `${dailyTargetLine}\n\n` +
-      `Sent ${formatWatTimestamp()}\n\n` +
-     `Not an entry signal — bias context only.`;
-
+  const fullMessage = [
+  `${storylineEmoji} <b>${storylineDir} STORYLINE —</b>`,
+  `<b>${symbol} · W1 > D1 > H4</b>`,
+  "",
+  w1Summary,
+  d1BreakLine,
+  d1TapLine,
+  h4BreakLine,
+  "",
+  sequenceStatus,
+  "",
+  weeklyTargetLine,
+  dailyTargetLine,
+  "",
+  `Sent ${formatWatTimestamp()}`,
+  "",
+  "Not an entry signal — bias context only."
+]
+  .filter((line) => line !== null && line !== undefined)
+  .join("\n");
+  
     const stageText = h4Confirmed
     ? "H4 BO confirmed"
     : activeRetestTap
