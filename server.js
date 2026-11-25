@@ -45,6 +45,15 @@ function normalizeSymbol(input) {
     .toUpperCase()
     .replace(/\s+/g, "");
 
+  if (symbol === "BTCUSDT") {
+    return "BTC/USD";
+  }
+
+  if (/^[A-Z]{3,5}USDT$/.test(symbol)) {
+    const base = symbol.slice(0, -4);
+    return `${base}/USD`;
+  }
+
   if (/^[A-Z]{6}$/.test(symbol)) {
     symbol = `${symbol.slice(0, 3)}/${symbol.slice(3)}`;
   }
