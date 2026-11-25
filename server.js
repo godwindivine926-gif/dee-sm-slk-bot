@@ -2339,18 +2339,20 @@ let latestInternal = null;
       .reverse()
       .find((sw) => (isBull ? close > sw.level : close < sw.level));
 
-    if (brokenSwing) {
-      latestInternal = {
-  type: "H4 IBO",
-  kind: "INTERNAL_BO",
-  price: close,
-  level: brokenSwing.level,
-  datetime: dt
-};
-    }
+      if (brokenSwing) {
+    latestInternal = {
+      type: "H4 IBO",
+      kind: "INTERNAL_BO",
+      price: close,
+      level: brokenSwing.level,
+      datetime: dt
+    };
   }
+}
+
 if (latestInternal) return latestInternal;
-  return null;
+
+return null;
 }
 
 async function buildStorylineReport(rawSymbol) {
