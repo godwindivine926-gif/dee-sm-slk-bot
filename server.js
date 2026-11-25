@@ -2563,14 +2563,12 @@ const isAtOrAfterTap = evDate => {
   }
 
   let h4Confirmed = null;
-if (d1State.hasBreak && activeRetestTap && Array.isArray(h4Candles)) {
-  const afterTapBreak = Number.isFinite(effectiveTapTs)
-    ? findH4BreakAfterTap(h4Candles, d1Bias, effectiveTapTs)
-    : null;
+if (d1State.hasBreak && activeRetestTap && Array.isArray(h4Candles) && Number.isFinite(effectiveTapTs)) {
+  const afterTapBreak = findH4BreakAfterTap(h4Candles, d1Bias, effectiveTapTs);
 
   const fallbackH4Break =
     !afterTapBreak && typeof evaluateH4BreakoutInDirection === "function"
-      ? evaluateH4BreakoutInDirection(h4Candles, d1Bias, null)
+      ? evaluateH4BreakoutInDirection(h4Candles, d1Bias, effectiveTapTs)
       : null;
 
   h4Confirmed =
@@ -2584,13 +2582,6 @@ if (d1State.hasBreak && activeRetestTap && Array.isArray(h4Candles)) {
         }
       : null);
 }
-  
-    console.log("NZD/CAD H4 debug:", {
-    d1Bias,
-    effectiveTapTs,
-    lastH4: h4Candles?.slice(-4),
-    h4Confirmed
-  });
   
   const storylineEmoji = d1Bias === "BULLISH" ? "🟢" : d1Bias === "BEARISH" ? "🔴" : "⚪";
   const storylineDir = d1Bias === "BULLISH" ? "BULLISH" : d1Bias === "BEARISH" ? "BEARISH" : "NEUTRAL";
