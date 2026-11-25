@@ -2580,10 +2580,10 @@ if (d1State.hasBreak && activeRetestTap && Array.isArray(h4Candles) && Number.is
       ? evaluateH4BreakoutInDirection(h4Candles, d1Bias, effectiveTapTs)
       : null;
 
-  const fallbackTs = fallbackH4Break
-    ? parseCandleTimestamp(fallbackH4Break.datetime || fallbackH4Break.time || fallbackH4Break.timestamp)
-    : NaN;
-
+    const rawFallbackTime =
+    fallbackH4Break?.datetime || fallbackH4Break?.time || fallbackH4Break?.timestamp;
+  const fallbackTs = rawFallbackTime ? new Date(rawFallbackTime).getTime() : NaN;
+  
   const validFallbackBreak =
     fallbackH4Break &&
     Number.isFinite(fallbackTs) &&
