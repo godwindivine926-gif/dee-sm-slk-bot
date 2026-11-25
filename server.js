@@ -2345,16 +2345,18 @@ let latestInternal = null;
       kind: "INTERNAL_BO",
       price: close,
       level: brokenSwing.level,
-      datetime: dt
-    };
+              datetime: dt
+      };
+    }
   }
+
+  if (latestInternal) return latestInternal;
+
+  return null;
 }
 
-if (latestInternal) return latestInternal;
-
-return null;
-}
-
+async function buildStorylineReport(rawSymbol) {
+  
 async function buildStorylineReport(rawSymbol) {
   const symbol = normalizeSymbol(rawSymbol || "GBPUSD");
   
