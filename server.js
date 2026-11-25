@@ -2354,9 +2354,7 @@ let latestInternal = null;
 
   return null;
 }
-
-async function buildStorylineReport(rawSymbol) {
-  
+ 
 async function buildStorylineReport(rawSymbol) {
   const symbol = normalizeSymbol(rawSymbol || "GBPUSD");
   
