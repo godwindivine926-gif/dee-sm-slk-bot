@@ -2401,7 +2401,6 @@ const latestPrice = h4Candles?.[h4Candles.length - 1]?.close
     ? `📍 <b>Daily Intraday Target (${dailyTarget.label}):</b> ${dailyTarget.price}`
     : `📍 <b>Daily Intraday Target:</b> —`;
   
-  const latestW1 = w1Candles?.[w1Candles.length - 1];
   const w1Summary = w1Storyline?.formation
     ? `W1: ${w1Storyline.formation} (${w1Storyline.bias || "NEUTRAL"}) · ${formatBreakDate12h(w1Storyline.reaction_date || latestW1?.datetime)}`
     : `W1: ${w1Bias} · ${latestW1 ? formatBreakDate12h(latestW1.datetime) : "N/A"}`;
