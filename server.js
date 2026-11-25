@@ -2294,7 +2294,7 @@ function findH4BreakAfterTap(h4Candles, bias, afterTs = null) {
       bodySwings.push({ index: i, level: currBot, date: dt });
     }
   }
-
+let latestExternal = null;.  
   for (let i = 1; i < h4Candles.length; i++) {
     const c = h4Candles[i];
     const dt = c.datetime || c.date;
@@ -2309,21 +2309,22 @@ function findH4BreakAfterTap(h4Candles, bias, afterTs = null) {
       .reverse()
       .find((sw) => (isBull ? close > sw.level : close < sw.level));
 
-    if (brokenSwing) {
-      return {
-        type: "H4 EBO",
-        kind: "EXTERNAL_BO",
-        price: close,
-        level: brokenSwing.level,
-        datetime: dt
-      };
+    latestExternal = {
+  type: "H4 EBO",
+  kind: "EXTERNAL_BO",
+  price: close,
+  level: brokenSwing.level,
+  datetime: dt
+};
     }
   }
 
+if (latestExternal) return latestExternal;
   const swings = identifySwings(h4Candles);
   const reqSwingType = isBear ? "SWING_LOW" : "SWING_HIGH";
   const intSwings = swings.filter((sw) => sw.type === reqSwingType);
 
+let latestInternal = null;
   for (let i = 1; i < h4Candles.length; i++) {
     const c = h4Candles[i];
     const dt = c.datetime || c.date;
@@ -2339,16 +2340,16 @@ function findH4BreakAfterTap(h4Candles, bias, afterTs = null) {
       .find((sw) => (isBull ? close > sw.level : close < sw.level));
 
     if (brokenSwing) {
-      return {
-        type: "H4 IBO",
-        kind: "INTERNAL_BO",
-        price: close,
-        level: brokenSwing.level,
-        datetime: dt
-      };
+      latestInternal = {
+  type: "H4 IBO",
+  kind: "INTERNAL_BO",
+  price: close,
+  level: brokenSwing.level,
+  datetime: dt
+};
     }
   }
-
+if (latestInternal) return latestInternal;
   return null;
 }
 
