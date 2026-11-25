@@ -2588,10 +2588,11 @@ if (d1State.hasBreak && activeRetestTap && Array.isArray(h4Candles) && Number.is
     fallbackH4Break &&
     Number.isFinite(fallbackTs) &&
     Number.isFinite(effectiveTapTs) &&
-    fallbackTs >= effectiveTapTs
-      ? fallbackH4Break
-      : null;
-
+    const tapMs =
+  typeof effectiveTapTs === "number" && effectiveTapTs < 1e12
+    ? effectiveTapTs * 1000
+    : Number(effectiveTapTs);
+  
   h4Confirmed =
     afterTapBreak ||
     (validFallbackBreak
@@ -2610,8 +2611,14 @@ if (d1State.hasBreak && activeRetestTap && Array.isArray(h4Candles) && Number.is
     ? `D1 ${d1State.latestBreak.type} @ <b>${formatPrice(d1State.latestBreak.close)}</b> · ${formatBreakDate12h(d1State.latestBreak.datetime)}`
     : `D1 break: <i>None confirmed yet</i>`;
 
-    const d1TapLine = activeRetestTap
-  ? `D1 tap (${activeRetestTap.label}) @ <b>${formatPrice(activeRetestTap.price ?? activeRetestTap.level)}</b>`
+    const rawTapDate =
+  activeRetestTap?.date || activeRetestTap?.datetime || activeRetestTap?.time || null;
+const formattedTapDate = rawTapDate ? String(rawTapDate).slice(0, 10) : null;
+
+const d1TapLine = activeRetestTap
+  ? `D1 tap (${activeRetestTap.label}) @ <b>${formatPrice(
+      activeRetestTap.price ?? activeRetestTap.level
+    )}</b>${formattedTapDate ? ` · ${formattedTapDate}` : ""}`
   : null;
   
     const h4BreakLine =
