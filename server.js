@@ -2258,22 +2258,15 @@ function detectDevelopingD1TapAfterBreak(liveD1Candles, d1State, bias) {
 }
 
 function findH4BreakAfterTap(h4Candles, bias, afterTs = null) {
-  const afterMs = afterTs === null || afterTs === undefined ? NaN : toTimestampMs(afterTs, false);
+  const afterMs =
+    afterTs === null || afterTs === undefined
+      ? NaN
+      : typeof afterTs === "number"
+        ? afterTs
+        : toTimestampMs(afterTs, false);
+
   if (!Number.isFinite(afterMs) || !Array.isArray(h4Candles) || h4Candles.length < 3) {
     return null;
-    console.log("findH4BreakAfterTap check:", {
-    bias,
-    afterMs,
-    recentCandles: h4Candles.slice(-3).map((c) => {
-      const dt = c.datetime || c.date;
-      return {
-        dt,
-        cTs: dt ? toTimestampMs(dt, false) : NaN,
-        close: Number(c.close),
-        bot: bodyBottom(c)
-      };
-    })
-  });
   }
 
   const isBull = bias === "BULLISH";
@@ -2311,17 +2304,17 @@ function findH4BreakAfterTap(h4Candles, bias, afterTs = null) {
     const close = Number(c.close);
     if (!Number.isFinite(close)) continue;
 
-    const priorSwings = bodySwings.filter(sw => sw.index < i);
-    if (!priorSwings.length) continue;
+    const recentPrior = bodySwings.filter((sw) => sw.index < i).slice(-3);
+    const brokenSwing = [...recentPrior]
+      .reverse()
+      .find((sw) => (isBull ? close > sw.level : close < sw.level));
 
-    const target = priorSwings[priorSwings.length - 1];
-    const brokeExternal = isBull ? close > target.level : close < target.level;
-    if (brokeExternal) {
+    if (brokenSwing) {
       return {
         type: "H4 EBO",
         kind: "EXTERNAL_BO",
         price: close,
-        level: target.level,
+        level: brokenSwing.level,
         datetime: dt
       };
     }
@@ -2329,7 +2322,7 @@ function findH4BreakAfterTap(h4Candles, bias, afterTs = null) {
 
   const swings = identifySwings(h4Candles);
   const reqSwingType = isBear ? "SWING_LOW" : "SWING_HIGH";
-  const intSwings = swings.filter(sw => sw.type === reqSwingType);
+  const intSwings = swings.filter((sw) => sw.type === reqSwingType);
 
   for (let i = 1; i < h4Candles.length; i++) {
     const c = h4Candles[i];
@@ -2340,17 +2333,17 @@ function findH4BreakAfterTap(h4Candles, bias, afterTs = null) {
     const close = Number(c.close);
     if (!Number.isFinite(close)) continue;
 
-    const prior = intSwings.filter(sw => sw.index < i);
-    if (!prior.length) continue;
+    const recentPrior = intSwings.filter((sw) => sw.index < i).slice(-3);
+    const brokenSwing = [...recentPrior]
+      .reverse()
+      .find((sw) => (isBull ? close > sw.level : close < sw.level));
 
-    const target = prior[prior.length - 1];
-    const brokeInternal = isBull ? close > target.level : close < target.level;
-    if (brokeInternal) {
+    if (brokenSwing) {
       return {
         type: "H4 IBO",
         kind: "INTERNAL_BO",
         price: close,
-        level: target.level,
+        level: brokenSwing.level,
         datetime: dt
       };
     }
@@ -2358,7 +2351,7 @@ function findH4BreakAfterTap(h4Candles, bias, afterTs = null) {
 
   return null;
 }
-  
+
 async function buildStorylineReport(rawSymbol) {
   const symbol = normalizeSymbol(rawSymbol || "GBPUSD");
   
