@@ -2294,7 +2294,7 @@ function findH4BreakAfterTap(h4Candles, bias, afterTs = null) {
       bodySwings.push({ index: i, level: currBot, date: dt });
     }
   }
-let latestExternal = null;.  
+let latestExternal = null;
   for (let i = 1; i < h4Candles.length; i++) {
     const c = h4Candles[i];
     const dt = c.datetime || c.date;
