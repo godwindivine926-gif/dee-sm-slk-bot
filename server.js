@@ -2610,10 +2610,10 @@ if (d1State.hasBreak && activeRetestTap && Array.isArray(h4Candles) && Number.is
   const storylineEmoji = d1Bias === "BULLISH" ? "🟢" : d1Bias === "BEARISH" ? "🔴" : "⚪";
   const storylineDir = d1Bias === "BULLISH" ? "BULLISH" : d1Bias === "BEARISH" ? "BEARISH" : "NEUTRAL";
 
-  const d1BreakLine = d1State.latestBreak
-    ? `D1 ${d1State.latestBreak.type} @ <b>${formatPrice(d1State.latestBreak.close)}</b> · ${formatBreakDate12h(d1State.latestBreak.datetime)}`
+    const d1BreakLine = d1State.latestBreak
+    ? `D1 ${d1Bias} ${d1State.latestBreak.type} @ <b>${formatPrice(d1State.latestBreak.close)}</b> · ${formatBreakDate12h(d1State.latestBreak.datetime)}`
     : `D1 break: <i>None confirmed yet</i>`;
-
+  
     const rawTapDate =
   activeRetestTap?.date || activeRetestTap?.datetime || activeRetestTap?.time || null;
 const formattedTapDate = rawTapDate ? String(rawTapDate).slice(0, 10) : null;
@@ -2624,11 +2624,11 @@ const d1TapLine = activeRetestTap
     )}</b>${formattedTapDate ? ` · ${formattedTapDate}` : ""}`
   : null;
   
-    const h4BreakLine =
+      const h4BreakLine =
     d1State.hasBreak && activeRetestTap
       ? h4Confirmed
-        ? `${h4Confirmed.type} @ <b>${formatPrice(h4Confirmed.price)}</b> · ${formatBreakDate12h(h4Confirmed.datetime)}`
-        : `H4 break: <i>Watching for H4 breakout (external BO preferred)</i>`
+        ? `${h4Confirmed.type.replace(/^H4\s+/, `H4 ${d1Bias} `)} @ <b>${formatPrice(h4Confirmed.price)}</b> · ${formatBreakDate12h(h4Confirmed.datetime)}`
+        : `H4 break: <i>Watching for ${d1Bias} H4 breakout (external BO preferred)</i>`
       : `H4 break: <i>Locked until D1 breaks & taps a key level</i>`;
   
   const sequenceStatus = h4Confirmed
