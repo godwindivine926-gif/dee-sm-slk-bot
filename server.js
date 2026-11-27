@@ -2342,15 +2342,16 @@ function findH4BreakAfterTap(h4Candles, bias, afterTs = null) {
       .reverse()
       .find((sw) => (isBull ? close > sw.level : close < sw.level));
 
-    if (brokenSwing) {
+        if (brokenSwing) {
       latestInternal = {
         type: "H4 IBO",
         kind: "INTERNAL_BO",
+        bias: isBull ? "BULLISH" : "BEARISH",
         price: close,
         level: brokenSwing.level,
         datetime: dt
       };
-    }
+        }
   }
 
   if (latestInternal) return latestInternal;
@@ -2555,16 +2556,16 @@ const isAtOrAfterTap = evDate => {
         ? close > latestPriorSwing.level
         : close < latestPriorSwing.level;
 
-      if (brokeBody) {
-        return {
-          type: "H4 EBO",
-          kind: "EXTERNAL_BO",
-          price: close,
-          level: latestPriorSwing.level,
-          swingDate: latestPriorSwing.date,
-          datetime: dt
-        };
-      }
+          if (brokenSwing) {
+      latestExternal = {
+        type: "H4 EBO",
+        kind: "EXTERNAL_BO",
+        bias: isBull ? "BULLISH" : "BEARISH",
+        price: close,
+        level: brokenSwing.level,
+        datetime: dt
+      };
+          }
     }
 
     return null;
@@ -2627,9 +2628,8 @@ const d1TapLine = activeRetestTap
       const h4BreakLine =
     d1State.hasBreak && activeRetestTap
       ? h4Confirmed
-        ? `${h4Confirmed.type.replace(/^H4\s+/, `H4 ${d1Bias} `)} @ <b>${formatPrice(h4Confirmed.price)}</b> · ${formatBreakDate12h(h4Confirmed.datetime)}`
-        : `H4 break: <i>Watching for ${d1Bias} H4 breakout (external BO preferred)</i>`
-      : `H4 break: <i>Locked until D1 breaks & taps a key level</i>`;
+        ? `${h4Confirmed.type.replace(/^H4\s+/, `H4 ${h4Confirmed.bias || d1Bias || ""} `.replace(/\s{2,}/, " "))} @ <b>${formatPrice(h4Confirmed.price)}</b> · ${formatBreakDate12h(h4Confirmed.datetime)}`
+         : `H4 break: <i>Locked until D1 breaks & taps a key level</i>`;
   
   const sequenceStatus = h4Confirmed
     ? `<b>Status: H4 breakout confirmed — look for entries</b>`
