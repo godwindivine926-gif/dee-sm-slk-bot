@@ -2625,7 +2625,7 @@ const d1TapLine = activeRetestTap
     )}</b>${formattedTapDate ? ` · ${formattedTapDate}` : ""}`
   : null;
   
-        let h4BreakLine = `H4 break: <i>Locked until D1 breaks & taps a key level</i>`;
+          let h4BreakLine = `H4 break: <i>Locked until D1 breaks & taps a key level</i>`;
   if (d1State.hasBreak && activeRetestTap) {
     if (h4Confirmed) {
       const h4Dir = h4Confirmed.bias || d1Bias || "";
