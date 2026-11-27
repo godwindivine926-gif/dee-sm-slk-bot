@@ -2625,11 +2625,18 @@ const d1TapLine = activeRetestTap
     )}</b>${formattedTapDate ? ` · ${formattedTapDate}` : ""}`
   : null;
   
-      const h4BreakLine =
-    d1State.hasBreak && activeRetestTap
-      ? h4Confirmed
-        ? `${h4Confirmed.type.replace(/^H4\s+/, `H4 ${h4Confirmed.bias || d1Bias || ""} `.replace(/\s{2,}/, " "))} @ <b>${formatPrice(h4Confirmed.price)}</b> · ${formatBreakDate12h(h4Confirmed.datetime)}`
-         : `H4 break: <i>Locked until D1 breaks & taps a key level</i>`;
+        let h4BreakLine = `H4 break: <i>Locked until D1 breaks & taps a key level</i>`;
+  if (d1State.hasBreak && activeRetestTap) {
+    if (h4Confirmed) {
+      const h4Dir = h4Confirmed.bias || d1Bias || "";
+      const h4Label = h4Dir
+        ? h4Confirmed.type.replace(/^H4\s+/, `H4 ${h4Dir} `)
+        : h4Confirmed.type;
+      h4BreakLine = `${h4Label} @ <b>${formatPrice(h4Confirmed.price)}</b> · ${formatBreakDate12h(h4Confirmed.datetime)}`;
+    } else {
+      h4BreakLine = `H4 break: <i>Watching for ${d1Bias} H4 breakout (external BO preferred)</i>`;
+    }
+  }
   
   const sequenceStatus = h4Confirmed
     ? `<b>Status: H4 breakout confirmed — look for entries</b>`
