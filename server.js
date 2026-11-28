@@ -3578,7 +3578,7 @@ const BASE_MARKET_UNIVERSE = [
   "BTC/USD", "ETH/USD",
 
   // Metals (2)
-  "XAU/USD", "XAG/USD",
+  "XAU/USD",
 
   // Indices (4)
   "NDX", "DAX", "N225",
@@ -3808,10 +3808,10 @@ async function runPacedMarketScan({
     matchedCount += 1;
 
     const emoji = w1Setup.bias === "BULLISH" ? "🟢" : "🔴";
-    const msg =
+        const msg =
       `${emoji} <b>${triggerLabel} (${matchedCount}/${targetCount}) — ${symbol}</b>\n\n` +
-      `W1: <b>${w1Setup.reason}</b> · ${formatBreakDate12h(w1Setup.weekDate)}\n` +
-      `D1: <b>${latestBreak.type}</b> @ <b>${formatPrice(latestBreak.close)}</b> · ${formatBreakDate12h(latestBreak.datetime)}\n` +
+      `W1: <b>${escapeHtml(w1Setup.reason)}</b> · ${formatBreakDate12h(w1Setup.weekDate)}\n` +
+      `D1: <b>${escapeHtml(latestBreak.type)}</b> @ <b>${formatPrice(latestBreak.close)}</b> · ${formatBreakDate12h(latestBreak.datetime)}\n` +
       `Next: Watch for D1 tap & H4 ${w1Setup.bias} breakout\n\n` +
       `Sent ${formatWatTimestamp()}\n\n` +
       `<i>Not an entry signal — bias context only.</i>`;
